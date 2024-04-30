@@ -37,7 +37,7 @@ from lightgbm import LGBMClassifier
 
 from sklearn.metrics import make_scorer
 
-from sklearn.metrics import f1_score, confusion_matrix, classification_report, recall_score
+from sklearn.metrics import f1_score, confusion_matrix, classification_report, recall_score, roc_auc_score, accuracy
 from sklearn.model_selection import learning_curve
 
 from sklearn.model_selection import cross_val_score
@@ -51,10 +51,12 @@ from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+
 
 # import des données traitées
-train_complete = pd.read_csv('FEATURE_ENG/train_complete.csv')
-test_complete = pd.read_csv('FEATURE_ENG/test_complete.csv')
+path_data = "C:\\Users\\Utilisateur\\formation_datascientist\\projet_7_implementez_un_modèle_de_scoring\\"
+train_complete = pd.read_csv(path_data + 'train_complete.csv')
 
 X_train_initial = train_complete.drop('TARGET', axis=1)
 y_train_initial = train_complete.TARGET
@@ -78,7 +80,6 @@ imputer_mean = SimpleImputer(strategy='mean')
 
 smote = SMOTE(random_state=0)
 
-y_train.value_counts(normalize=True)
 
 model_logistic_1 = Pipeline([('imputer', imputer_mean), ('scaler', StandardScaler()), ('smote', smote), ('classifier', LogisticRegression())])
 #model_logistic_2 = Pipeline([('imputer', imputer_knn), ('scaler', StandardScaler()), ('smote', smote), ('classifier', LogisticRegression())])
@@ -96,31 +97,54 @@ def score_metier(y_true, ypred):
   FN, FP = conf_rav[2], conf_rav[1]
   return 10 * FN + FP
 
+
 scorer_metier =  make_scorer(score_metier, greater_is_better=False)
+
+
+def ComputeAndPrintPerformance(y_valid, ypred_valid, y_valid_hat, y_train, ypred_train, print=False):
+    
+  # performances sur la validation
+  confusion_mat = confusion_matrix(y_valid, ypred_valid)
+  class_report = classification_report(y_valid, ypred_valid)
+  score_fn = score_metier(y_valid, ypred_valid)
+  roc = roc_auc_score(y_valid, y_valid_hat)
+  acc = accuracy(y_valid, ypred_valid)
+  f1 = f1_score(y_valid, ypred_valid)
+ 
+  # détection de l'overfitting
+  train_recall = round(recall_score(y_train, ypred_train), 2)
+  valid_recall = round(recall_score(y_valid, ypred_valid), 2)
+  # calcul indicateur overfitting : overfitting si proche de 0, sinon proche de 1
+  overfit_indicator = round(((1 - train_recall) + (valid_recall / train_recall)) / 2, 2)
+  
+  # affichage des résultats si demandé
+  if print == True:
+      print('------------------------------')
+      print('confusion_matrix :\n', confusion_mat)
+      print('classification_report :\n', class_report)
+      print('score_metier = ' , score_fn)
+      print('roc auc score = ' , roc)
+      print('accuracy = ' , acc)
+      print('f1-score = ' , f1)
+      print('overfitting indicators : \n')
+      print("train recall = ", train_recall)
+      print("valid recall = ", valid_recall)
+      print('delta train - valid = ', round(train_recall - valid_recall, 2))
+      print('overfit_indicator : ', overfit_indicator)
+      print('------------------------------')
+
 
 def evaluation(model):
 
   model.fit(X_train, y_train)
+  
   ypred_valid = model.predict(X_valid)
+  y_valid_hat = model.decision_function(X_valid, y_valid)
   ypred_train = model.predict(X_train)
 
-  print(confusion_matrix(y_valid, ypred_valid))
-  print(classification_report(y_valid, ypred_valid))
-  print('score_metier' , score_metier(y_valid, ypred_valid))
-  train_recall, valid_recall = round(recall_score(y_train, ypred_train), 2), round(recall_score(y_valid, ypred_valid), 2)
-  print("train recall = ", train_recall)
-  print("valid recall = ", valid_recall)
-  print('delta train - valid = ', round(train_recall - valid_recall, 2))
-  overfit_indicator = round(((1 - train_recall) + (valid_recall / train_recall)) / 2, 2) # overfitting si proche de 0, bon si proche de 1
-  print('overfit_indicator : ', overfit_indicator)
-  #N, train_score, val_score = learning_curve(model, X_train, y_train,
-  #                                           cv=4, scoring=scorer_metier,
-  #                                           train_sizes=np.linspace(0.1, 1, 10)
-  #plt.figure(figsize=(12, 8))
-  #plt.plot(N, train_score.mean(axis=1), label='train score')
-  #plt.plot(N, val_score.mean(axis=1), label='validation score')
-  #plt.legand()
-  #plt.show()
+  ComputeAndPrintPerformance(y_valid, ypred_valid, y_valid_hat, y_train, ypred_train, print=True)
+  
+
 
 dict_of_models = {
     'model_logistic_1' : model_logistic_1,
@@ -140,3 +164,23 @@ print(X_valid.shape)
 for name, model in dict_of_models.items():
   print(name)
   evaluation(model)
+  
+  
+  
+  
+def evaluationCV(model, params, random = False):
+
+  search = GridSearchCV(model, params, scoring=scorer_metier, cv=4)
+  search.fit(X_train, y_train)
+  ypred_valid = model.predict(X_valid)
+  ypred_train = model.predict(X_train)
+
+  print(confusion_matrix(y_valid, ypred_valid))
+  print(classification_report(y_valid, ypred_valid))
+  print('score_metier' , score_metier(y_valid, ypred_valid))
+  train_recall, valid_recall = round(recall_score(y_train, ypred_train), 2), round(recall_score(y_valid, ypred_valid), 2)
+  print("train recall = ", train_recall)
+  print("valid recall = ", valid_recall)
+  print('delta train - valid = ', round(train_recall - valid_recall, 2))
+  overfit_indicator = round(((1 - train_recall) + (valid_recall / train_recall)) / 2, 2) # overfitting si proche de 0, bon si proche de 1
+  print('overfit_indicator : ', overfit_indicator)
