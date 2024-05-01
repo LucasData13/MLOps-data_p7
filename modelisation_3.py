@@ -207,20 +207,20 @@ def saving_mlflow(experience_name, run_name, model, model_library,
             case 'skl':
                 mlflow.sklearn.log_model(
                             sk_model=model,
-                            artifact_path="model",
-                            registered_model_name="sk-learn-model"
+                            artifact_path="model"#,
+                            #registered_model_name="sk-learn-model"
                         )
             case 'xgb':
                 mlflow.xgboost.log_model(
-                            xgb_model=model,
+                            xgb_model=model.named_steps['classifier'],
                             artifact_path="model",
-                            registered_model_name="xgb-model"
+                            #registered_model_name="xgb-model"
                         )
             case 'lgb':
                 mlflow.lightgbm.log_model(
-                            booster=model,
+                            lgb_model=model.named_steps['classifier'],
                             artifact_path="model",
-                            registered_model_name="lightgbm-model"
+                            #registered_model_name="lightgbm-model"
                         )
 
         # les paramètres du modèle
@@ -273,52 +273,123 @@ def evaluation(model, training_set, testing_set, thd=0.5, print_scores=True):
     y_train_hat = model.predict_proba(training_set[0])
 
     metrics_grid_numeric, metrics_grid_tab = ComputeAndPrintPerformance(y_valid_hat,
-                                                                        y_valid, y_train_hat,
-                                                                        y_train, thd=thd,
+                                                                        testing_set[1], y_train_hat,
+                                                                        training_set[1], thd=thd,
                                                                         print_scores=print_scores)
 
     return model, metrics_grid_numeric, metrics_grid_tab
 
 
-dict_of_models = {
-    'model_logistic_1': model_logistic_1,
-    'model_rdmfst_1': model_rdmfst_1,
-    'model_rdmfst_2': model_rdmfst_2,
-    'model_xgb_1': model_xgb_1,
-    'model_xgb_2': model_xgb_2,
-    'model_lgb_1': model_lgb_1,
-    'model_lgb_2': model_lgb_2
-}
-
+"""
 X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial,
                                                                         y_train_initial,
                                                                         sampling=0.01)
 
 print(X_train.shape)
 print(X_valid.shape)
+"""
 
-model, metrics_grid_numeric, metrics_grid_tab = evaluation(model=model_logistic_1,
-                                                           training_set=[
-                                                               X_train, y_train],
-                                                           testing_set=[
-                                                               X_valid, y_valid],
-                                                           thd=0.5,
-                                                           print_scores=True)
+def mlflow_generation(experience_name, phase_name, 
+                      dict_of_models, sampling_rate, 
+                      threshold=0.5,
+                      print_scores=False):
+    """
 
-tag_grid = {
-    "model_type" : "LogisticRegression",
-    "steps" : str(list(model_logistic_1.named_steps.keys())),
-    "phase" : "default baseline" # "default baseline", "optimisation", "test evaluation"
-    }
+    Parameters
+    ----------
+    experience_name : str
+        nom à donner à l'expérience, en lien avec la phase d'étude.
+    phase_name : str
+        phase de l'étude : "default baseline", "optimisation parameters", 
+        "optimisation threshold" ou "test evaluation".
+    dict_of_models : dict
+        dictionnaire des pipelines avec estimateur.
+    sampling_rate : float
+        proportion des données injectée dans la fonction.
+        Utilisé dans un premier temps pour estimer un compromis performance/temps de calcul.
+    threshold : float, optional
+        seuil de classification des modèles. The default is 0.5.
 
-saving_mlflow(experience_name='test_setting_complet',
-             run_name='premier run reglog sur données réduites',
-             model=model,
-             model_library='skl',
-             metrics_grid_numeric=metrics_grid_numeric,
-             metrics_grid_tab=metrics_grid_tab,
-             tag_grid=tag_grid)
+    Returns
+    -------
+    None.
 
+    """
+    
+    X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial,
+                                                                            y_train_initial,
+                                                                            sampling=sampling_rate)
+    
+    print(X_train.shape)
+    print(X_valid.shape)
+    
+    for name, model_pipe in dict_of_models.items():
+        
+        model, metrics_grid_numeric, metrics_grid_tab = evaluation(model=model_pipe[0],
+                                                                   training_set=[
+                                                                       X_train, y_train],
+                                                                   testing_set=[
+                                                                       X_valid, y_valid],
+                                                                   thd=threshold,
+                                                                   print_scores=print_scores)
+        
+        tag_grid = {
+            "model_type" : str(model_pipe[0].named_steps['classifier']),
+            "steps" : str(list(model_pipe[0].named_steps.keys())),
+            "phase" : phase_name # "default baseline", 
+                                # "optimisation parameters", 
+                                # "optimisation threshold"
+                                # "test evaluation"
+            }
+        
+        saving_mlflow(experience_name=experience_name,
+                     run_name=phase_name + tag_grid["model_type"],
+                     model=model,
+                     model_library=model_pipe[1],
+                     metrics_grid_numeric=metrics_grid_numeric,
+                     metrics_grid_tab=metrics_grid_tab,
+                     tag_grid=tag_grid)
+
+
+# première expérience : -----------------------------------------------------
+    # entraînement baseline sans optimisation
+    # sur une petite partie des données
+
+dict_of_models = {
+    'model_logistic_1': [model_logistic_1, 'skl'],
+    'model_rdmfst_1': [model_rdmfst_1, 'skl'],
+    'model_rdmfst_2': [model_rdmfst_2, 'skl'],
+    'model_xgb_1': [model_xgb_1, 'xgb'],
+    'model_xgb_2': [model_xgb_2, 'xgb'],
+    'model_lgb_1': [model_lgb_1, 'lgb'],
+    'model_lgb_2': [model_lgb_2, 'lgb']
+}
+
+mlflow_generation(experience_name = "default baseline 1% data", 
+                  phase_name = "default baseline", 
+                  dict_of_models = dict_of_models,
+                  sampling_rate = 0.01, 
+                  threshold=0.5,
+                  print_scores=False)
+
+
+# deuxieme expérience : -----------------------------------------------------
+    # entraînement des meilleurs estimateurs par defaut
+    # en optimisant les hyperparamètres
+    
+
+
+# troisième expérience : ----------------------------------------------------
+    # sélection des meileurs modèles avec optimisation des hyperparamètres
+    # et optimisation de leur seuil de classification
+    
+    
+    
+# quatrième et dernière expérience : ---------------------------------------
+    # sélection des meileurs modèles après optimisation des seuil
+    # évaluation des performances sur le set de test jamais vu par les modèles
+    
+    
 
 '''
 for name, model in dict_of_models.items():
