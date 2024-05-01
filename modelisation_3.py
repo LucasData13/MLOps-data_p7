@@ -8,56 +8,41 @@ Original file is located at
 """
 
 # pandas and numpy for data manipulation
+import os
+import cloudpickle
+import mlflow.lightgbm
+import mlflow.xgboost
+import mlflow.sklearn
+import mlflow
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.model_selection import learning_curve
+from sklearn.metrics import f1_score, confusion_matrix, classification_report, recall_score, roc_auc_score, accuracy_score
+from sklearn.metrics import make_scorer
+from lightgbm import LGBMClassifier
+from xgboost import XGBClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer, KNNImputer
+from imblearn.pipeline import Pipeline
+from imblearn.over_sampling import SMOTE
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import train_test_split
+import gc
+import warnings
+import seaborn as sns
 import pandas as pd
 import numpy as np
 
 # matplotlib and seaborn for plotting
 import matplotlib.pyplot as plt
 plt.rcParams['font.size'] = 22
-import seaborn as sns
 
 # Suppress warnings from pandas
-import warnings
 warnings.filterwarnings('ignore')
 
 # Memory management
-import gc
-
-from sklearn.model_selection import train_test_split
-from sklearn.model_selection import cross_val_score
-from imblearn.over_sampling import SMOTE
-from imblearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer, KNNImputer
-from sklearn.preprocessing import StandardScaler
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
-
-from sklearn.metrics import make_scorer
-
-from sklearn.metrics import f1_score, confusion_matrix, classification_report, recall_score, roc_auc_score, accuracy_score
-from sklearn.model_selection import learning_curve
-
-from sklearn.model_selection import cross_val_score
-from imblearn.over_sampling import SMOTE
-from imblearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer, KNNImputer
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
-
-from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
-
-import mlflow
-import mlflow.sklearn
-import mlflow.xgboost
-import mlflow.lightgbm
-import cloudpickle
 
 
 # import des données traitées
@@ -69,93 +54,113 @@ y_train_initial = train_complete.TARGET
 
 
 def train_test_spliter(X, y, sampling=0.3):
-  # extraction d'un échantillon de sampling % de l'ensemble
-  X_train, X_extracted, y_train, y_extracted = train_test_split(X, y, test_size=sampling, stratify=y, random_state=0)
-  # création d'un set de test
-  X_train, X_test, y_train, y_test = train_test_split(X_extracted, y_extracted, test_size=0.2, stratify=y_extracted, random_state=0)
-  # création d'un set de validation
-  X_train, X_valid, y_train, y_valid = train_test_split(X_train, y_train, test_size=0.2, stratify=y_train, random_state=0)
-  return X_train, y_train, X_valid, y_valid, X_test, y_test
-
+    # extraction d'un échantillon de sampling % de l'ensemble
+    X_train, X_extracted, y_train, y_extracted = train_test_split(
+        X, y, test_size=sampling, stratify=y, random_state=0)
+    # création d'un set de test
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_extracted, y_extracted, test_size=0.2, stratify=y_extracted, random_state=0)
+    # création d'un set de validation
+    X_train, X_valid, y_train, y_valid = train_test_split(
+        X_train, y_train, test_size=0.2, stratify=y_train, random_state=0)
+    return X_train, y_train, X_valid, y_valid, X_test, y_test
 
 
 imputer_mean = SimpleImputer(strategy='mean')
 smote = SMOTE(random_state=0)
 
 
-model_logistic_1 = Pipeline([('imputer', imputer_mean), ('scaler', StandardScaler()), ('smote', smote), ('classifier', LogisticRegression())])
-model_rdmfst_1 = Pipeline([('imputer', imputer_mean), ('smote', smote), ('classifier', RandomForestClassifier(random_state=0))])
-model_rdmfst_2 = Pipeline([('imputer', imputer_mean), ('classifier', RandomForestClassifier(class_weight='balanced', random_state=0))])
-model_xgb_1 = Pipeline([('imputer', imputer_mean), ('smote', smote), ('classifier', XGBClassifier(random_state=0))])
-model_xgb_2 = Pipeline([('classifier', XGBClassifier(random_state=0, scale_pos_weight=8))])
-model_lgb_1 = Pipeline([('imputer', imputer_mean), ('smote', smote), ('classifier', LGBMClassifier(random_state=0))])
-model_lgb_2 = Pipeline([('classifier', LGBMClassifier(random_state=0, is_unbalance=True))])
+model_logistic_1 = Pipeline([('imputer', imputer_mean), ('scaler', StandardScaler(
+)), ('smote', smote), ('classifier', LogisticRegression())])
+model_rdmfst_1 = Pipeline([('imputer', imputer_mean), ('smote', smote),
+                          ('classifier', RandomForestClassifier(random_state=0))])
+model_rdmfst_2 = Pipeline([('imputer', imputer_mean), ('classifier',
+                          RandomForestClassifier(class_weight='balanced', random_state=0))])
+model_xgb_1 = Pipeline([('imputer', imputer_mean), ('smote', smote),
+                       ('classifier', XGBClassifier(random_state=0))])
+model_xgb_2 = Pipeline(
+    [('classifier', XGBClassifier(random_state=0, scale_pos_weight=8))])
+model_lgb_1 = Pipeline([('imputer', imputer_mean), ('smote', smote),
+                       ('classifier', LGBMClassifier(random_state=0))])
+model_lgb_2 = Pipeline(
+    [('classifier', LGBMClassifier(random_state=0, is_unbalance=True))])
 
 
 def score_metier(y_true, ypred):
-  conf_matrix = confusion_matrix(y_true, ypred)
-  conf_rav = conf_matrix.ravel()
-  FN, FP = conf_rav[2], conf_rav[1]
-  return 10 * FN + FP
-
-scorer_metier =  make_scorer(score_metier, greater_is_better=False)
+    conf_matrix = confusion_matrix(y_true, ypred)
+    conf_rav = conf_matrix.ravel()
+    FN, FP = conf_rav[2], conf_rav[1]
+    return 10 * FN + FP
 
 
-def ComputeAndPrintPerformance(y_valid_hat, y_valid, y_train_hat, y_train, thd = 0.5, print_scores=False):
-  
-  # classification cible selon seuil
-  ypred_valid = np.array([y_valid_hat[:, 1][i] > thd for i in range(len(y_valid_hat))]).astype(int)
-  ypred_train = np.array([y_train_hat[:, 1][i] > thd for i in range(len(y_train_hat))]).astype(int)
-  
-  # performances sur la validation
-  confusion_mat = confusion_matrix(y_valid, ypred_valid)
-  class_report = classification_report(y_valid, ypred_valid)
-  score_fn = score_metier(y_valid, ypred_valid)
-  roc = round(roc_auc_score(y_valid, y_valid_hat[:, 1].reshape(-1, 1)), 2)
-  acc = round(accuracy_score(y_valid, ypred_valid), 2)
-  f1 = round(f1_score(y_valid, ypred_valid), 2)
- 
-  # détection de l'overfitting
-  train_recall = round(recall_score(y_train, ypred_train), 2)
-  valid_recall = round(recall_score(y_valid, ypred_valid), 2)
-  delta_train_valid = round(train_recall - valid_recall, 2)
-  
-  # affichage des résultats si demandé
-  if print_scores == True:
-      print('------------------------------')
-      print('tables : \n')
-      print('confusion_matrix :\n', confusion_mat)
-      print('classification_report :\n', class_report)
-      print('\nperformances : ')
-      print('score_metier = ' , score_fn)
-      print('roc auc score = ' , roc)
-      print('accuracy_score = ' , acc)
-      print('f1-score = ' , f1)
-      print('\n overfitting : ')
-      print("train recall = ", train_recall)
-      print("valid recall = ", valid_recall)
-      print('delta_train_valid = ', delta_train_valid)
-      print('------------------------------')
-      
-  # stockage metrics dans un dictionnaire
-  metrics_grid_numeric = {
-          'score_metier' : score_fn,
-          'roc_auc_score' : roc,
-          'accuracy_score' : acc,
-          'f1_score' : f1,
-          'train_recall' : train_recall,
-          'delta_train_valid' : delta_train_valid
-      }
-  metrics_grid_tab = {
-          'confusion_matrix' : confusion_mat,
-          'classification_report' : class_report
-      }
-    
-  return metrics_grid_numeric, metrics_grid_tab
+scorer_metier = make_scorer(score_metier, greater_is_better=False)
 
 
+def ComputeAndPrintPerformance(y_valid_hat, y_valid, y_train_hat, y_train, thd=0.5, print_scores=False):
 
-def saving_mlflow(experience_name, run_name, model, model_library, metrics_grid_numeric, metrics_grid_tab):
+    # classification cible selon seuil
+    ypred_valid = np.array(
+        [y_valid_hat[:, 1][i] > thd for i in range(len(y_valid_hat))]).astype(int)
+    ypred_train = np.array(
+        [y_train_hat[:, 1][i] > thd for i in range(len(y_train_hat))]).astype(int)
+
+    # performances sur la validation
+    confusion_mat = confusion_matrix(y_valid, ypred_valid)
+    class_report = classification_report(y_valid, ypred_valid)
+    score_fn = score_metier(y_valid, ypred_valid)
+    roc = round(roc_auc_score(y_valid, y_valid_hat[:, 1].reshape(-1, 1)), 2)
+    acc = round(accuracy_score(y_valid, ypred_valid), 2)
+    f1 = round(f1_score(y_valid, ypred_valid), 2)
+
+    # détection de l'overfitting
+    train_recall = round(recall_score(y_train, ypred_train), 2)
+    valid_recall = round(recall_score(y_valid, ypred_valid), 2)
+    delta_train_valid = round(train_recall - valid_recall, 2)
+
+    # affichage des résultats si demandé
+    if print_scores == True:
+        print('------------------------------')
+        print('tables : \n')
+        print('confusion_matrix :\n', confusion_mat)
+        print('classification_report :\n', class_report)
+        print('\nperformances : ')
+        print('score_metier = ', score_fn)
+        print('roc auc score = ', roc)
+        print('accuracy_score = ', acc)
+        print('f1-score = ', f1)
+        print('\n overfitting : ')
+        print("train recall = ", train_recall)
+        print("valid recall = ", valid_recall)
+        print('delta_train_valid = ', delta_train_valid)
+        print('------------------------------')
+
+    # stockage metrics dans un dictionnaire
+    metrics_grid_numeric = {
+        'score_metier': score_fn,
+        'roc_auc_score': roc,
+        'accuracy_score': acc,
+        'f1_score': f1,
+        'train_recall': train_recall,
+        'delta_train_valid': delta_train_valid
+    }
+    metrics_grid_tab = {
+        'confusion_matrix': confusion_mat,
+        'classification_report': class_report
+    }
+
+    return metrics_grid_numeric, metrics_grid_tab
+
+
+def delete_file(file_path):
+    # Vérifier si le fichier existe avant de le supprimer
+    if os.path.exists(file_path):
+        # Supprimer le fichier
+        os.remove(file_path)
+
+
+def saving_mlflow(experience_name, run_name, model, model_library,
+                  metrics_grid_numeric, metrics_grid_tab,
+                  tag_grid=None):
     """
 
     Parameters
@@ -184,97 +189,137 @@ def saving_mlflow(experience_name, run_name, model, model_library, metrics_grid_
 
     # récupération des hyperparamètres
     hyperparameters = model.get_params()
+
     # convertion en texte du classification report et matrice de confusion
-    #metrics_grid
-    
-    
+    class_report_matrix_path = path_data + "classification_report.txt"
+    with open(class_report_matrix_path, "w") as f:
+        f.write(metrics_grid_tab['classification_report'])
+
+    confusion_matrix_path = path_data + "confusion_matrix.txt"
+    with open(confusion_matrix_path, "w") as f:
+        f.write(np.array2string(metrics_grid_tab['confusion_matrix']))
+
+    # lancement de l'expérience et du run mlflow
     mlflow.set_experiment(experience_name)
+    with mlflow.start_run(run_name=run_name):
+        # enregistre model
+        match model_library:
+            case 'skl':
+                mlflow.sklearn.log_model(
+                            sk_model=model,
+                            artifact_path="model",
+                            registered_model_name="sk-learn-model"
+                        )
+            case 'xgb':
+                mlflow.xgboost.log_model(
+                            xgb_model=model,
+                            artifact_path="model",
+                            registered_model_name="xgb-model"
+                        )
+            case 'lgb':
+                mlflow.lightgbm.log_model(
+                            booster=model,
+                            artifact_path="model",
+                            registered_model_name="lightgbm-model"
+                        )
 
-    with mlflow.start_run(run_name = run_name):
+        # les paramètres du modèle
+        mlflow.log_params(hyperparameters)
 
-            # enregistre model
-            match model_library:
-                case 'skl':
-                    mlflow.sklearn.log_model(model, "random_forest_model")
-                case 'xgb':
-                    mlflow.xgboost.log_model(model, "xgboost_model")
-                case 'lgb':
-                    mlflow.lightgbm.log_model(model, "lightgbm_model")
-            # les paramètres du modèle
-            mlflow.log_params(hyperparameters)
-            # les mesures de performance
-            for metric_name, value in metrics_grid_numeric.items():
-                mlflow.log_metric(metric_name, value)
-            # finir le run
-            mlflow.end_run()
-  
+        # les tables
+        mlflow.log_artifact(class_report_matrix_path, "table scoring")
+        delete_file(class_report_matrix_path)
+        mlflow.log_artifact(confusion_matrix_path, "table scoring")
+        delete_file(confusion_matrix_path)
+        
+        # Ajouter des tags au run
+        if tag_grid is not None:
+            for tag_name, tag_value in tag_grid.items():
+                mlflow.set_tag(tag_name, tag_value)
+
+        # les mesures de performance
+        for metric_name, value in metrics_grid_numeric.items():
+            mlflow.log_metric(metric_name, value)
+
+        # finir le run
+        mlflow.end_run()
 
 
-
-def evaluation(model, training_set, testing_set, thd = 0.5, print_scores=True):
-  """
-
-    Parameters
-    ----------
-    model : TYPE -> estimator
-        DESCRIPTION -> estimateur à évaluer
-    training_set : TYPE -> liste à deux éléments
-        DESCRIPTION -> contient les données d'entraînement et la cible (ex: [X_train, y_train])
-    testing_set : TYPE -> liste à deux éléments
-        DESCRIPTION -> contient les données d'évaluation à prédire et la cible (ex: [X_test, y_test])
-    thd : TYPE -> float, optional
-        DESCRIPTION -> seuil de classification de l'estimateur à évaluer, The default is 0.5.
-    print : TYPE -> bool, optional
-        DESCRIPTION -> affiche les metrics calculés si True, The default is True.
-
-    Returns
-    -------
-    None.
-
+def evaluation(model, training_set, testing_set, thd=0.5, print_scores=True):
     """
-    
-  model.fit(training_set[0], training_set[1])
-  
-  y_valid_hat = model.predict_proba(testing_set[0])
-  y_train_hat = model.predict_proba(training_set[0])
-  
-  metrics_grid_numeric, metrics_grid_tab = ComputeAndPrintPerformance(y_valid_hat, 
-                                                                      y_valid, y_train_hat, 
-                                                                      y_train, thd=thd, 
-                                                                      print_scores=print_scores)
-  
-  return model, metrics_grid_numeric, metrics_grid_tab
-  
+
+      Parameters
+      ----------
+      model : TYPE -> estimator
+          DESCRIPTION -> estimateur à évaluer
+      training_set : TYPE -> liste à deux éléments
+          DESCRIPTION -> contient les données d'entraînement et la cible (ex: [X_train, y_train])
+      testing_set : TYPE -> liste à deux éléments
+          DESCRIPTION -> contient les données d'évaluation à prédire et la cible (ex: [X_test, y_test])
+      thd : TYPE -> float, optional
+          DESCRIPTION -> seuil de classification de l'estimateur à évaluer, The default is 0.5.
+      print : TYPE -> bool, optional
+          DESCRIPTION -> affiche les metrics calculés si True, The default is True.
+
+      Returns
+      -------
+      None.
+
+      """
+
+    model.fit(training_set[0], training_set[1])
+
+    y_valid_hat = model.predict_proba(testing_set[0])
+    y_train_hat = model.predict_proba(training_set[0])
+
+    metrics_grid_numeric, metrics_grid_tab = ComputeAndPrintPerformance(y_valid_hat,
+                                                                        y_valid, y_train_hat,
+                                                                        y_train, thd=thd,
+                                                                        print_scores=print_scores)
+
+    return model, metrics_grid_numeric, metrics_grid_tab
 
 
 dict_of_models = {
-    'model_logistic_1' : model_logistic_1,
-    'model_rdmfst_1' : model_rdmfst_1,
-    'model_rdmfst_2' : model_rdmfst_2,
-    'model_xgb_1' : model_xgb_1,
-    'model_xgb_2' : model_xgb_2,
-    'model_lgb_1' : model_lgb_1,
-    'model_lgb_2' : model_lgb_2
+    'model_logistic_1': model_logistic_1,
+    'model_rdmfst_1': model_rdmfst_1,
+    'model_rdmfst_2': model_rdmfst_2,
+    'model_xgb_1': model_xgb_1,
+    'model_xgb_2': model_xgb_2,
+    'model_lgb_1': model_lgb_1,
+    'model_lgb_2': model_lgb_2
 }
 
-X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial, 
-                                                                        y_train_initial, 
+X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial,
+                                                                        y_train_initial,
                                                                         sampling=0.01)
 
 print(X_train.shape)
 print(X_valid.shape)
 
-model, metrics_grid_numeric, metrics_grid_tab = evaluation(model = model_logistic_1, 
-                                                           training_set = [X_train, y_train], 
-                                                           testing_set = [X_valid, y_valid], 
-                                                           thd = 0.5, 
+model, metrics_grid_numeric, metrics_grid_tab = evaluation(model=model_logistic_1,
+                                                           training_set=[
+                                                               X_train, y_train],
+                                                           testing_set=[
+                                                               X_valid, y_valid],
+                                                           thd=0.5,
                                                            print_scores=True)
-saving_mlflow(experience_name = 'test_script', 
-              run_name = 'premier run reglog sur données réduites', 
-              model = model, 
-              model_library = 'skl', 
-              metrics_grid_numeric = metrics_grid_numeric, 
-              metrics_grid_tab = metrics_grid_tab)
+
+tag_grid = {
+    "model_type" : "LogisticRegression",
+    "steps" : str(list(model_logistic_1.named_steps.keys())),
+    "phase" : "default baseline" # "default baseline", "optimisation", "test evaluation"
+    }
+
+saving_mlflow(experience_name='test_setting_complet',
+             run_name='premier run reglog sur données réduites',
+             model=model,
+             model_library='skl',
+             metrics_grid_numeric=metrics_grid_numeric,
+             metrics_grid_tab=metrics_grid_tab,
+             tag_grid=tag_grid)
+
+
 '''
 for name, model in dict_of_models.items():
   print(name)
