@@ -16,8 +16,8 @@ import mlflow.sklearn
 import mlflow
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.model_selection import learning_curve
-from sklearn.metrics import f1_score, confusion_matrix, classification_report, recall_score, roc_auc_score, accuracy_score
+from sklearn.model_selection import learning_curve, cross_validate
+from sklearn.metrics import f1_score, precision_score, confusion_matrix, classification_report, recall_score, roc_auc_score, accuracy_score
 from sklearn.metrics import make_scorer
 from lightgbm import LGBMClassifier
 from xgboost import XGBClassifier
@@ -25,7 +25,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer, KNNImputer
-from imblearn.pipeline import Pipeline
+from imblearn.pipeline import Pipeline as imbpipeline
 from imblearn.over_sampling import SMOTE
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
@@ -34,6 +34,14 @@ import warnings
 import seaborn as sns
 import pandas as pd
 import numpy as np
+
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import KNNImputer
+from sklearn.preprocessing import FunctionTransformer
+from sklearn.preprocessing import RobustScaler
+
+from sklearn.base import TransformerMixin
 
 # matplotlib and seaborn for plotting
 import matplotlib.pyplot as plt
@@ -48,6 +56,7 @@ warnings.filterwarnings('ignore')
 # import des données traitées
 path_data = "C:\\Users\\Utilisateur\\formation_datascientist\\projet_7_implementez_un_modèle_de_scoring\\"
 train_complete = pd.read_csv(path_data + 'train_complete.csv')
+train_complete = train_complete.drop('SK_ID_CURR', axis=1)
 
 X_train_initial = train_complete.drop('TARGET', axis=1)
 y_train_initial = train_complete.TARGET
@@ -68,23 +77,98 @@ def train_test_spliter(X, y, sampling=0.3):
 
 imputer_mean = SimpleImputer(strategy='mean')
 smote = SMOTE(random_state=0)
+scaler = RobustScaler()
+
+"""
+# brouilon________________________________________________________
+dummyClassifier
+
+t = train_complete.dtypes
+i = t[t == bool].index
+train_complete[i].isna().mean()
+
+# Afficher toutes les colonnes
+#pd.set_option('display.max_columns', None)
+train_complete.head()
+train_complete.FLAG_DOCUMENT_13.value_counts()
 
 
-model_logistic_1 = Pipeline([('imputer', imputer_mean), ('scaler', StandardScaler(
+discrete_values = [[0, 2, 4, 6, 8, 10],
+                   [1, 2, 3, 4, 5 , 6]]
+values_to_discretize = [[1.5, 3.7, 5.0, 7.9], 
+                        [4.1, 6.8, 7, 4]]
+
+# ________________________________________________________________
+"""
+
+t = X_train_initial.dtypes
+discrete_features = t[(t == 'int64') | (t == 'bool')].index
+continuous_features = t[(t != 'int64') & (t != 'bool')].index
+
+# Définition de la fonction re_discretize
+def re_discretize(array):
+    return np.round(array).astype(int)
+
+
+discrete_preprocessor = Pipeline([
+    ('rediscretizer', FunctionTransformer(lambda x: re_discretize(x)))  # Redicrétisation des variables discrètes avec la fonction re_discretize
+])
+
+# Création de la pipeline principale avec SMOTE et le classificateur XGBoost
+model_xgb_essai = imbpipeline([
+    ('scaler', scaler),
+    ('imputer_knn', KNNImputer()),
+    ('smote', smote),  # Équilibrage des classes avec SMOTE
+    ('discretor', ColumnTransformer([
+        ('discrete', discrete_preprocessor, discrete_features)  # Appliquer redicrétisation aux colonnes discrètes avec KBinsDiscretizer
+    ])),
+    ('classifier', XGBClassifier(random_state=0))  # Classificateur XGBoost
+])
+
+class InverseTransformer(TransformerMixin):
+    def __init__(self, transformer):
+        self.transformer = transformer
+    
+    def fit(self, X, y=None):
+        return self
+    
+    def transform(self, X):
+        return self.transformer.transform(X)
+    
+    def inverse_transform(self, X):
+        return self.transformer.inverse_transform(X)
+
+model_xgb_essai_debug = imbpipeline([
+    ('scaler', scaler),
+    ('imputer_knn', KNNImputer()),
+    ('smote', smote),
+    ('inverse_scaler', InverseTransformer(scaler))
+    
+])
+
+X_smote = model_xgb_essai_debug.fit_transform(X_valid, y_valid)
+print(X_smote.shape)
+print(X_valid.shape)
+
+
+# il n'y a que 2 variables booleennes FLAG_PHONE et FLAG_DOCUMENT_3
+# qui n'ont pas de valeurs manquantes
+
+model_logistic_1 = imbpipeline([('imputer', imputer_mean), ('scaler', StandardScaler(
 )), ('smote', smote), ('classifier', LogisticRegression(random_state=0))])
-model_logistic_2 = Pipeline([('imputer', imputer_mean), ('scaler', StandardScaler(
+model_logistic_2 = imbpipeline([('imputer', imputer_mean), ('scaler', StandardScaler(
 )), ('classifier', LogisticRegression(random_state=0))])
-model_rdmfst_1 = Pipeline([('imputer', imputer_mean), ('smote', smote),
+model_rdmfst_1 = imbpipeline([('imputer', imputer_mean), ('smote', smote),
                           ('classifier', RandomForestClassifier(random_state=0))])
-model_rdmfst_2 = Pipeline([('imputer', imputer_mean), ('classifier',
+model_rdmfst_2 = imbpipeline([('imputer', imputer_mean), ('classifier',
                           RandomForestClassifier(random_state=0))])
-model_xgb_1 = Pipeline([('smote', smote),
+model_xgb_1 = imbpipeline([('smote', smote),
                        ('classifier', XGBClassifier(random_state=0))])
-model_xgb_2 = Pipeline(
+model_xgb_2 = imbpipeline(
     [('classifier', XGBClassifier(random_state=0))])
-model_lgb_1 = Pipeline([('smote', smote),
+model_lgb_1 = imbpipeline([('smote', smote),
                        ('classifier', LGBMClassifier(random_state=0))])
-model_lgb_2 = Pipeline(
+model_lgb_2 = imbpipeline(
     [('classifier', LGBMClassifier(random_state=0))])
 
 
@@ -355,6 +439,29 @@ def mlflow_generation(experience_name, phase_name,
                      tag_grid=tag_grid)
 
 
+def RapidEval(classifier, X, y, cv, scorers, return_train_score=False):
+    scores = cross_validate(classifier, X, y, cv=cv, scoring=scorers, return_train_score=return_train_score)
+    return scores.mean()
+
+
+scorers = {
+    'score_metier': scorer_metier,
+    'accuracy': make_scorer(accuracy_score, greater_is_better=True),
+    'precision': make_scorer(precision_score, greater_is_better=True),
+    'recall': make_scorer(recall_score, greater_is_better=True),
+    'f1': make_scorer(f1_score, greater_is_better=True),
+    'roc auc': make_scorer(roc_auc_score, greater_is_better=True)
+}
+
+X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial,
+                                                                        y_train_initial,
+                                                                        sampling=0.01)
+
+RapidEval(model_xgb_essai, X_train, y_train, 10, scorers, True)
+
+
+'''
+
 # premières expériences : -----------------------------------------------------
     # entraînement baseline sans optimisation
     # sur une petite partie des données
@@ -387,7 +494,7 @@ for samp in sampling_values:
     # entraînement des meilleurs estimateurs par defaut sur 30% des données
     # en optimisant les hyperparamètres
         # retenus : model_logistic_1, model_xgb_2  et model_lgb_2
-'''
+
         result = mlflow.evaluate(
             model_info.model_uri,
             eval_data,
