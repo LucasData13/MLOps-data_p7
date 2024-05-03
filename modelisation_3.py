@@ -71,26 +71,28 @@ smote = SMOTE(random_state=0)
 
 
 model_logistic_1 = Pipeline([('imputer', imputer_mean), ('scaler', StandardScaler(
-)), ('smote', smote), ('classifier', LogisticRegression())])
+)), ('smote', smote), ('classifier', LogisticRegression(random_state=0))])
+model_logistic_2 = Pipeline([('imputer', imputer_mean), ('scaler', StandardScaler(
+)), ('classifier', LogisticRegression(random_state=0))])
 model_rdmfst_1 = Pipeline([('imputer', imputer_mean), ('smote', smote),
                           ('classifier', RandomForestClassifier(random_state=0))])
 model_rdmfst_2 = Pipeline([('imputer', imputer_mean), ('classifier',
-                          RandomForestClassifier(class_weight='balanced', random_state=0))])
-model_xgb_1 = Pipeline([('imputer', imputer_mean), ('smote', smote),
+                          RandomForestClassifier(random_state=0))])
+model_xgb_1 = Pipeline([('smote', smote),
                        ('classifier', XGBClassifier(random_state=0))])
 model_xgb_2 = Pipeline(
-    [('classifier', XGBClassifier(random_state=0, scale_pos_weight=8))])
-model_lgb_1 = Pipeline([('imputer', imputer_mean), ('smote', smote),
+    [('classifier', XGBClassifier(random_state=0))])
+model_lgb_1 = Pipeline([('smote', smote),
                        ('classifier', LGBMClassifier(random_state=0))])
 model_lgb_2 = Pipeline(
-    [('classifier', LGBMClassifier(random_state=0, is_unbalance=True))])
+    [('classifier', LGBMClassifier(random_state=0))])
 
 
 def score_metier(y_true, ypred):
     conf_matrix = confusion_matrix(y_true, ypred)
     conf_rav = conf_matrix.ravel()
     FN, FP = conf_rav[2], conf_rav[1]
-    return 10 * FN + FP
+    return (10 * FN + FP)/len(ypred)
 
 
 scorer_metier = make_scorer(score_metier, greater_is_better=False)
@@ -266,12 +268,12 @@ def evaluation(model, training_set, testing_set, thd=0.5, print_scores=True):
       None.
 
       """
-
+   
     model.fit(training_set[0], training_set[1])
-
+    
     y_valid_hat = model.predict_proba(testing_set[0])
     y_train_hat = model.predict_proba(training_set[0])
-
+    
     metrics_grid_numeric, metrics_grid_tab = ComputeAndPrintPerformance(y_valid_hat,
                                                                         testing_set[1], y_train_hat,
                                                                         training_set[1], thd=thd,
@@ -320,6 +322,8 @@ def mlflow_generation(experience_name, phase_name,
                                                                             y_train_initial,
                                                                             sampling=sampling_rate)
     
+    
+    
     print(X_train.shape)
     print(X_valid.shape)
     
@@ -334,7 +338,7 @@ def mlflow_generation(experience_name, phase_name,
                                                                    print_scores=print_scores)
         
         tag_grid = {
-            "model_type" : str(model_pipe[0].named_steps['classifier']),
+            "model_name" : str(name),
             "steps" : str(list(model_pipe[0].named_steps.keys())),
             "phase" : phase_name # "default baseline", 
                                 # "optimisation parameters", 
@@ -343,7 +347,7 @@ def mlflow_generation(experience_name, phase_name,
             }
         
         saving_mlflow(experience_name=experience_name,
-                     run_name=phase_name + tag_grid["model_type"],
+                     run_name=experience_name + ' - ' + phase_name + ' - ' + tag_grid["model_name"],
                      model=model,
                      model_library=model_pipe[1],
                      metrics_grid_numeric=metrics_grid_numeric,
@@ -351,12 +355,13 @@ def mlflow_generation(experience_name, phase_name,
                      tag_grid=tag_grid)
 
 
-# première expérience : -----------------------------------------------------
+# premières expériences : -----------------------------------------------------
     # entraînement baseline sans optimisation
     # sur une petite partie des données
 
 dict_of_models = {
     'model_logistic_1': [model_logistic_1, 'skl'],
+    'model_logistic_2': [model_logistic_2, 'skl'],
     'model_rdmfst_1': [model_rdmfst_1, 'skl'],
     'model_rdmfst_2': [model_rdmfst_2, 'skl'],
     'model_xgb_1': [model_xgb_1, 'xgb'],
@@ -365,19 +370,125 @@ dict_of_models = {
     'model_lgb_2': [model_lgb_2, 'lgb']
 }
 
-mlflow_generation(experience_name = "default baseline 1% data", 
-                  phase_name = "default baseline", 
-                  dict_of_models = dict_of_models,
-                  sampling_rate = 0.01, 
-                  threshold=0.5,
-                  print_scores=False)
+# avec 1, 10, 30, 50 et 70% des données
+sampling_values = [0.01, 0.1, 0.3, 0.5, 0.7]
+
+for samp in sampling_values:
+    
+    mlflow_generation(experience_name = f"first exp {samp*100}% data", 
+                      phase_name = "default baseline", 
+                      dict_of_models = dict_of_models,
+                      sampling_rate = samp, 
+                      threshold=0.5,
+                      print_scores=False)
 
 
 # deuxieme expérience : -----------------------------------------------------
-    # entraînement des meilleurs estimateurs par defaut
+    # entraînement des meilleurs estimateurs par defaut sur 30% des données
     # en optimisant les hyperparamètres
-    
+        # retenus : model_logistic_1, model_xgb_2  et model_lgb_2
+'''
+        result = mlflow.evaluate(
+            model_info.model_uri,
+            eval_data,
+            targets="TARGET",
+            model_type="classifier",
+            evaluators=["default"],
+        )
 
+def mlflow_generationGridCV(experience_name, phase_name, 
+                      dict_of_models, sampling_rate, params,  
+                      threshold=0.5,
+                      print_scores=False):
+    """
+
+    Parameters
+    ----------
+    experience_name : str
+        nom à donner à l'expérience, en lien avec la phase d'étude.
+    phase_name : str
+        phase de l'étude : "default baseline", "optimisation parameters", 
+        "optimisation threshold" ou "test evaluation".
+    dict_of_models : dict
+        dictionnaire des pipelines avec estimateur.
+    sampling_rate : float
+        proportion des données injectée dans la fonction.
+        Utilisé dans un premier temps pour estimer un compromis performance/temps de calcul.
+    params : dict
+        dictionnaire des hyperparamètres.
+    threshold : float, optional
+        seuil de classification des modèles. The default is 0.5.
+
+    Returns
+    -------
+    None.
+
+    """
+    
+    X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial,
+                                                                            y_train_initial,
+                                                                            sampling=sampling_rate)
+    
+    
+    
+    print(X_train.shape)
+    print(X_valid.shape)
+    
+    
+    for name, model_pipe in dict_of_models.items():
+        
+        search = GridSearchCV(model_pipe, params, scoring=scorer_metier, cv=4)
+        search.fit(X_train, y_train)
+        model_best = search.best_estimator_
+        
+        model, metrics_grid_numeric, metrics_grid_tab = evaluation(model=model_best,
+                                                                   training_set=[
+                                                                       X_train, y_train],
+                                                                   testing_set=[
+                                                                       X_valid, y_valid],
+                                                                   thd=threshold,
+                                                                   print_scores=print_scores)
+        
+        tag_grid = {
+            "model_name" : str(name),
+            "steps" : str(list(model_pipe[0].named_steps.keys())),
+            "phase" : phase_name # "default baseline", 
+                                # "optimisation parameters", 
+                                # "optimisation threshold"
+                                # "test evaluation"
+            }
+        
+        saving_mlflow(experience_name=experience_name,
+                     run_name=experience_name + ' - ' + phase_name + ' - ' + tag_grid["model_name"],
+                     model=model,
+                     model_library=model_pipe[1],
+                     metrics_grid_numeric=metrics_grid_numeric,
+                     metrics_grid_tab=metrics_grid_tab,
+                     tag_grid=tag_grid)
+        
+dict_of_models_phase_2 = {
+    'model_logistic_1': [model_logistic_1, 'skl'],
+    'model_xgb_2': [model_xgb_2, 'xgb'],
+    'model_lgb_2': [model_lgb_2, 'lgb']
+}
+
+params = {
+    'classifier__penalty': ['l1', 'l2'],
+    'classifier__C': [0.001, 0.01, 0.1, 1, 10],
+    'classifier__solver': ['liblinear', 'saga'],
+    'classifier__max_iter': [100, 200, 300],
+    'classifier__class_weight': [None, 'balanced']
+    }
+search = GridSearchCV(model_logistic_1, params, scoring=scorer_metier, cv=4)
+search.fit(X_train, y_train)
+model = search.best_estimator_
+
+mlflow_generation(experience_name = "second exp 30% data", 
+                  phase_name = "optimisation parameters", 
+                  dict_of_models = dict_of_models_phase_2,
+                  sampling_rate = 0.3, 
+                  threshold=0.5,
+                  print_scores=False)
 
 # troisième expérience : ----------------------------------------------------
     # sélection des meileurs modèles avec optimisation des hyperparamètres
@@ -391,13 +502,14 @@ mlflow_generation(experience_name = "default baseline 1% data",
     
     
 
-'''
+
+
+
 for name, model in dict_of_models.items():
   print(name)
   evaluation(model)
   
 
-  
 
 def evaluationCV(model, params, random = False):
 
@@ -415,5 +527,5 @@ def evaluationCV(model, params, random = False):
   print('delta train - valid = ', round(train_recall - valid_recall, 2))
   overfit_indicator = round(((1 - train_recall) + (valid_recall / train_recall)) / 2, 2) # overfitting si proche de 0, bon si proche de 1
   print('overfit_indicator : ', overfit_indicator)
-  
+
 '''
