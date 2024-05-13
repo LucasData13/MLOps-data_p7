@@ -14,6 +14,7 @@ import mlflow.lightgbm
 import mlflow.xgboost
 import mlflow.sklearn
 import mlflow
+from mlflow.models import make_metric, infer_signature
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import learning_curve, cross_validate
@@ -43,6 +44,14 @@ from sklearn.preprocessing import RobustScaler
 
 from sklearn.base import TransformerMixin
 
+from sklearn.experimental import enable_iterative_imputer 
+from sklearn.impute import IterativeImputer
+from sklearn.linear_model import BayesianRidge
+
+from scipy.stats import randint, uniform
+
+from time import time
+
 # matplotlib and seaborn for plotting
 import matplotlib.pyplot as plt
 plt.rcParams['font.size'] = 22
@@ -64,112 +73,92 @@ y_train_initial = train_complete.TARGET
 
 def train_test_spliter(X, y, sampling=0.3):
     # extraction d'un échantillon de sampling % de l'ensemble
-    X_train, X_extracted, y_train, y_extracted = train_test_split(
-        X, y, test_size=sampling, stratify=y, random_state=0)
+    X_train_step_1, X_extracted, y_train_step_1, y_extracted = train_test_split(
+        X, y, test_size = sampling, stratify=y, random_state=0)
     # création d'un set de test
-    X_train, X_test, y_train, y_test = train_test_split(
+    X_train_step_2, X_test, y_train_step_2, y_test = train_test_split(
         X_extracted, y_extracted, test_size=0.2, stratify=y_extracted, random_state=0)
     # création d'un set de validation
     X_train, X_valid, y_train, y_valid = train_test_split(
-        X_train, y_train, test_size=0.2, stratify=y_train, random_state=0)
+        X_train_step_2, y_train_step_2, test_size=0.25, stratify=y_train_step_2, random_state=0)
     return X_train, y_train, X_valid, y_valid, X_test, y_test
 
 
+imputer = IterativeImputer(estimator=BayesianRidge(), initial_strategy='median', random_state=0)
+imputer_median = SimpleImputer(strategy='median')
 imputer_mean = SimpleImputer(strategy='mean')
 smote = SMOTE(random_state=0)
 scaler = RobustScaler()
+std_scaler = StandardScaler()
 
-"""
-# brouilon________________________________________________________
-dummyClassifier
-
-t = train_complete.dtypes
-i = t[t == bool].index
-train_complete[i].isna().mean()
-
-# Afficher toutes les colonnes
-#pd.set_option('display.max_columns', None)
-train_complete.head()
-train_complete.FLAG_DOCUMENT_13.value_counts()
+# Sélection des colonnes de type int
+# et Récupération des indices des colonnes de type int
+discrete_features_names = X_train_initial.select_dtypes(include=['int', 'bool']).columns
+discrete_features_indices = [X_train_initial.columns.get_loc(col) for col in discrete_features_names]
 
 
-discrete_values = [[0, 2, 4, 6, 8, 10],
-                   [1, 2, 3, 4, 5 , 6]]
-values_to_discretize = [[1.5, 3.7, 5.0, 7.9], 
-                        [4.1, 6.8, 7, 4]]
 
-# ________________________________________________________________
-"""
-
-t = X_train_initial.dtypes
-discrete_features = t[(t == 'int64') | (t == 'bool')].index
-continuous_features = t[(t != 'int64') & (t != 'bool')].index
+preprocessing_over = imbpipeline([
+    ('scaler', std_scaler),
+    ('imputer', imputer_mean),
+    ('smote', smote)
+    ])
 
 # Définition de la fonction re_discretize
 def re_discretize(array):
     return np.round(array).astype(int)
 
+# Redicrétisation des variables discrètes avec la fonction re_discretize
+discrete_preprocessor = Pipeline([('rediscretizer', FunctionTransformer(lambda x: re_discretize(x)))])
 
-discrete_preprocessor = Pipeline([
-    ('rediscretizer', FunctionTransformer(lambda x: re_discretize(x)))  # Redicrétisation des variables discrètes avec la fonction re_discretize
-])
+# ne pas oublier inverse transform entre les deux
+preprocessing_rediscret = Pipeline([
+    ('discretiser', ColumnTransformer(transformers=[
+        ('discrete', discrete_preprocessor, discrete_features_indices)], remainder='passthrough'))
+    ])
 
-# Création de la pipeline principale avec SMOTE et le classificateur XGBoost
-model_xgb_essai = imbpipeline([
-    ('scaler', scaler),
-    ('imputer_knn', KNNImputer()),
-    ('smote', smote),  # Équilibrage des classes avec SMOTE
-    ('discretor', ColumnTransformer([
-        ('discrete', discrete_preprocessor, discrete_features)  # Appliquer redicrétisation aux colonnes discrètes avec KBinsDiscretizer
-    ])),
-    ('classifier', XGBClassifier(random_state=0))  # Classificateur XGBoost
-])
+def BalanceData(X, y):
+    X_balanced, y_balanced = preprocessing_over.fit_resample(X, y)
+    X_balanced = scaler.inverse_transform(X_balanced)
+    X_balanced = pd.DataFrame(preprocessing_rediscret.fit_transform(X_balanced),
+                                        columns=X.columns)
+    return X_balanced, y_balanced
 
-class InverseTransformer(TransformerMixin):
-    def __init__(self, transformer):
-        self.transformer = transformer
-    
-    def fit(self, X, y=None):
-        return self
-    
-    def transform(self, X):
-        return self.transformer.transform(X)
-    
-    def inverse_transform(self, X):
-        return self.transformer.inverse_transform(X)
+# brouilon________________________________________________________
+'''
+X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial, y_train_initial, sampling=0.01)
 
-model_xgb_essai_debug = imbpipeline([
-    ('scaler', scaler),
-    ('imputer_knn', KNNImputer()),
-    ('smote', smote),
-    ('inverse_scaler', InverseTransformer(scaler))
-    
-])
+X_train_preprocess_1, y_train_preprocess_1 = preprocessing_over.fit_resample(X_train, y_train)
+X_train_preprocess_1 = scaler.inverse_transform(X_train_preprocess_1)
+X_train_preprocess_1 = pd.DataFrame(preprocessing_rediscret.fit_transform(X_train_preprocess_1),
+                                    columns=X_train.columns)
 
-X_smote = model_xgb_essai_debug.fit_transform(X_valid, y_valid)
-print(X_smote.shape)
-print(X_valid.shape)
+'''
+#_________________________________________________________________
 
 
-# il n'y a que 2 variables booleennes FLAG_PHONE et FLAG_DOCUMENT_3
-# qui n'ont pas de valeurs manquantes
+# pour des questions de temps de calculs je fais de l'imputation par la moyenne plutôt que knn ou baysianridge
+# je privilégie également le standard_scaler au robust_scaler qui donne des performances nettement meilleures
 
-model_logistic_1 = imbpipeline([('imputer', imputer_mean), ('scaler', StandardScaler(
-)), ('smote', smote), ('classifier', LogisticRegression(random_state=0))])
-model_logistic_2 = imbpipeline([('imputer', imputer_mean), ('scaler', StandardScaler(
-)), ('classifier', LogisticRegression(random_state=0))])
-model_rdmfst_1 = imbpipeline([('imputer', imputer_mean), ('smote', smote),
-                          ('classifier', RandomForestClassifier(random_state=0))])
-model_rdmfst_2 = imbpipeline([('imputer', imputer_mean), ('classifier',
-                          RandomForestClassifier(random_state=0))])
-model_xgb_1 = imbpipeline([('smote', smote),
-                       ('classifier', XGBClassifier(random_state=0))])
-model_xgb_2 = imbpipeline(
-    [('classifier', XGBClassifier(random_state=0))])
-model_lgb_1 = imbpipeline([('smote', smote),
-                       ('classifier', LGBMClassifier(random_state=0))])
-model_lgb_2 = imbpipeline(
-    [('classifier', LGBMClassifier(random_state=0))])
+model_logistic_1 = imbpipeline([('imputer', imputer_mean), ('scaler', std_scaler), ('classifier', LogisticRegression(random_state=0))])
+model_logistic_2 = imbpipeline([('imputer', imputer_mean), ('scaler', std_scaler), ('classifier', LogisticRegression(class_weight='balanced', random_state=0))])
+model_logistic_3 = Pipeline([('imputer', imputer_mean), ('scaler', std_scaler), ('classifier', LogisticRegression(random_state=0))])
+model_logistic_4 = imbpipeline([('imputer', imputer_mean), ('scaler', std_scaler), ('smote', smote), ('classifier', LogisticRegression(random_state=0))])
+
+model_rdmfst_1 = imbpipeline([('imputer', imputer_mean), ('classifier', RandomForestClassifier(random_state=0))])
+model_rdmfst_2 = imbpipeline([('imputer', imputer_mean), ('classifier', RandomForestClassifier(class_weight='balanced', random_state=0))])
+model_rdmfst_3 = Pipeline([('imputer', imputer_mean), ('classifier', RandomForestClassifier(random_state=0))])
+model_rdmfst_4 = imbpipeline([('imputer', imputer_mean), ('smote', smote), ('classifier', RandomForestClassifier(random_state=0))])
+
+model_xgb_1 = imbpipeline([('classifier', XGBClassifier(random_state=0))])
+model_xgb_2 = imbpipeline([('classifier', XGBClassifier(scale_pos_weight=8, random_state=0))])
+model_xgb_3 = Pipeline([('classifier', XGBClassifier(random_state=0))])
+model_xgb_4 = imbpipeline([('imputer', imputer_mean), ('smote', smote), ('classifier', XGBClassifier(random_state=0))])
+
+model_lgb_1 = imbpipeline([('classifier', LGBMClassifier(random_state=0))])
+model_lgb_2 = imbpipeline([('classifier', LGBMClassifier(is_unbalance=True, random_state=0))])
+model_lgb_3 = Pipeline([('classifier', LGBMClassifier(random_state=0))])
+model_lgb_4 = imbpipeline([('imputer', imputer_mean), ('smote', smote), ('classifier', LGBMClassifier(random_state=0))])
 
 
 def score_metier(y_true, ypred):
@@ -178,8 +167,14 @@ def score_metier(y_true, ypred):
     FN, FP = conf_rav[2], conf_rav[1]
     return (10 * FN + FP)/len(ypred)
 
-
 scorer_metier = make_scorer(score_metier, greater_is_better=False)
+
+def score_metier_2(y_true, ypred):
+    FN = np.sum((y_true == 1) & (ypred == 0))
+    FP = np.sum((y_true == 0) & (ypred == 1))
+    return (10 * FN + FP)/y_true.shape[0]
+
+scorer_metier_2 = make_scorer(score_metier_2, greater_is_better=False)
 
 
 def ComputeAndPrintPerformance(y_valid_hat, y_valid, y_train_hat, y_train, thd=0.5, print_scores=False):
@@ -193,10 +188,17 @@ def ComputeAndPrintPerformance(y_valid_hat, y_valid, y_train_hat, y_train, thd=0
     # performances sur la validation
     confusion_mat = confusion_matrix(y_valid, ypred_valid)
     class_report = classification_report(y_valid, ypred_valid)
-    score_fn = score_metier(y_valid, ypred_valid)
+    score_fn = score_metier_2(y_valid, ypred_valid)
     roc = round(roc_auc_score(y_valid, y_valid_hat[:, 1].reshape(-1, 1)), 2)
     acc = round(accuracy_score(y_valid, ypred_valid), 2)
     f1 = round(f1_score(y_valid, ypred_valid), 2)
+    precision = round(precision_score(y_valid, ypred_valid), 2)
+    
+    # éléments des confusions normalisés
+    FNr = np.sum((y_valid == 1) & (ypred_valid == 0)) / np.sum((y_valid == 1))
+    FPr = np.sum((y_valid == 0) & (ypred_valid == 1)) / np.sum((y_valid == 0))
+    TPr = np.sum((y_valid == 1) & (ypred_valid == 1)) / np.sum((y_valid == 1))
+    TNr = np.sum((y_valid == 0) & (ypred_valid == 0)) / np.sum((y_valid == 0))
 
     # détection de l'overfitting
     train_recall = round(recall_score(y_train, ypred_train), 2)
@@ -227,7 +229,14 @@ def ComputeAndPrintPerformance(y_valid_hat, y_valid, y_train_hat, y_train, thd=0
         'accuracy_score': acc,
         'f1_score': f1,
         'train_recall': train_recall,
-        'delta_train_valid': delta_train_valid
+        'delta_train_valid': delta_train_valid,
+        'valid_recall': valid_recall,
+        'calssification threshold' : thd,
+        'FN' : FNr,
+        'FP' : FPr,
+        'TP' : TPr,
+        'TN' : TNr,
+        'precision' : precision
     }
     metrics_grid_tab = {
         'confusion_matrix': confusion_mat,
@@ -244,11 +253,11 @@ def delete_file(file_path):
         os.remove(file_path)
 
 
-def saving_mlflow(experience_name, run_name, model, model_library,
+def saving_mlflow(experience_name, run_name, model, signature, model_library,
                   metrics_grid_numeric, metrics_grid_tab,
                   tag_grid=None):
     """
-
+    updated pour normaliser la matrice de confusion et sauvegarder le threshold en tant que metric
     Parameters
     ----------
     experience_name : str
@@ -282,8 +291,9 @@ def saving_mlflow(experience_name, run_name, model, model_library,
         f.write(metrics_grid_tab['classification_report'])
 
     confusion_matrix_path = path_data + "confusion_matrix.txt"
+    conf_matrix_normalized = metrics_grid_tab['confusion_matrix'].astype('float') / metrics_grid_tab['confusion_matrix'].sum(axis=1)[:, np.newaxis]
     with open(confusion_matrix_path, "w") as f:
-        f.write(np.array2string(metrics_grid_tab['confusion_matrix']))
+        f.write(np.array2string(conf_matrix_normalized))
 
     # lancement de l'expérience et du run mlflow
     mlflow.set_experiment(experience_name)
@@ -293,18 +303,21 @@ def saving_mlflow(experience_name, run_name, model, model_library,
             case 'skl':
                 mlflow.sklearn.log_model(
                             sk_model=model,
+                            signature=signature,
                             artifact_path="model"#,
                             #registered_model_name="sk-learn-model"
                         )
             case 'xgb':
                 mlflow.xgboost.log_model(
                             xgb_model=model.named_steps['classifier'],
+                            signature=signature,
                             artifact_path="model",
                             #registered_model_name="xgb-model"
                         )
             case 'lgb':
                 mlflow.lightgbm.log_model(
                             lgb_model=model.named_steps['classifier'],
+                            signature=signature,
                             artifact_path="model",
                             #registered_model_name="lightgbm-model"
                         )
@@ -329,6 +342,7 @@ def saving_mlflow(experience_name, run_name, model, model_library,
 
         # finir le run
         mlflow.end_run()
+
 
 
 def evaluation(model, training_set, testing_set, thd=0.5, print_scores=True):
@@ -378,7 +392,8 @@ print(X_valid.shape)
 def mlflow_generation(experience_name, phase_name, 
                       dict_of_models, sampling_rate, 
                       threshold=0.5,
-                      print_scores=False):
+                      print_scores=False,
+                      train_test_split_=True):
     """
 
     Parameters
@@ -401,10 +416,10 @@ def mlflow_generation(experience_name, phase_name,
     None.
 
     """
-    
-    X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial,
-                                                                            y_train_initial,
-                                                                            sampling=sampling_rate)
+    if train_test_split_ == True:
+        X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial,
+                                                                                y_train_initial,
+                                                                                sampling=sampling_rate)
     
     
     
@@ -439,6 +454,479 @@ def mlflow_generation(experience_name, phase_name,
                      tag_grid=tag_grid)
 
 
+# brouillon fonction mlfow 2.0 avec mlflow.evaluate_____________________
+
+'''
+def custom_artifact(eval_df, builtin_metrics, artifacts_dir):
+    plt.scatter(eval_df["prediction"], eval_df["target"])
+    plt.xlabel("Targets")
+    plt.ylabel("Predictions")
+    plt.title("Targets vs. Predictions")
+    plot_path = os.path.join(artifacts_dir, "example_scatter_plot.png")
+    plt.savefig(plot_path)
+
+    return {
+        "example_scatter_plot_artifact": plot_path,
+    }
+'''
+
+def score_metier_ml(eval_df, _builtin_metrics):
+    FN = np.sum((eval_df["target"] == 1) & (eval_df["prediction"] == 0))
+    FP = np.sum((eval_df["target"] == 0) & (eval_df["prediction"] == 1))
+    return (10 * FN + FP)/eval_df.shape[0]
+
+    
+def running_mlflow(model, eval_data, exp_name, run_name, signature, model_library, training_time, tag_grid=None):
+    
+    mlflow.set_experiment(exp_name)
+    print('')
+    print("set_experiment step...")
+    print('')
+    with mlflow.start_run(run_name=run_name):
+       match model_library:
+            case 'skl':
+                model_info = mlflow.sklearn.log_model(
+                            sk_model=model,
+                            artifact_path="model",#,
+                            signature=signature
+                            #registered_model_name="sk-learn-model"
+                        )
+            case 'xgb':
+                model_info = mlflow.xgboost.log_model(
+                            xgb_model=model.named_steps['classifier'],
+                            artifact_path="model",
+                            signature=signature
+                            #registered_model_name="xgb-model"
+                        )
+            case 'lgb':
+                model_info = mlflow.lightgbm.log_model(
+                            lgb_model=model.named_steps['classifier'],
+                            artifact_path="model",
+                            signature=signature
+                            #registered_model_name="lightgbm-model"
+                        )
+       result = mlflow.evaluate(
+           model=model_info.model_uri,
+           data=eval_data,
+           targets="target",
+           model_type="classifier",
+           evaluators=["default"],
+           extra_metrics=[ # ou custom_metrics seul sans evaluators
+                 mlflow.models.make_metric( # mettre mon score métier
+                    eval_fn=score_metier_ml,
+                    name="score_metier",
+                    greater_is_better=False,
+                )
+            ]#,
+            #custom_artifacts=[
+            #    custom_artifact,
+            #]#,
+            #extra_metrics=[rmse_metric]
+       )
+       mlflow.log_params(model.get_params())
+       mlflow.log_metric('training_time', training_time)
+       # Ajouter des tags au run
+       if tag_grid is not None:
+           for tag_name, tag_value in tag_grid.items():
+               mlflow.set_tag(tag_name, tag_value)
+       mlflow.end_run()
+
+       return result
+   
+   
+
+def EvalModel(model, X_training, y_training, X_eval, y_eval, exp_name, run_name, model_library, tag_grid):
+    """
+    Parameters
+    ----------
+    model : ML model from sklearn, xgb or lgb
+        DESCRIPTION.
+    X_training : pandas.DataFrame
+        soit le X_train d'origine soit un X_train preprocessed (imputation, smote, etc.).
+    X_eval : pandas.DataFrame
+        utilisé pour la prediction et l'évaluation.
+    exp_name : str
+        nom de xp mlflow.
+    run_name : str
+        nom du run mlflow.
+    model_library : str
+        skl, xgb ou lgb.
+    Returns
+    -------
+    metrics evaluation dict.
+
+    """
+    
+    # creating the evaluation dataframe
+    eval_data = X_eval.copy()
+    eval_data["target"] = y_eval
+    
+    # infer model signature
+    t0 = time()
+    model.fit(X_training, y_training)
+    t1 = time() - t0
+    ypred = model.predict(X_eval)
+    signature = infer_signature(X_eval, ypred)
+    
+    result = running_mlflow(model, eval_data, exp_name, run_name, signature, model_library, t1, tag_grid)
+    
+    return result
+
+
+dict_of_models_unbalanced = {
+    'model_logistic_brute': [model_logistic_1, 'skl', {'balanced': 'no'}],
+    'model_rdmfst_brute': [model_rdmfst_1, 'skl', {'balanced': 'no'}],
+    'model_xgb_brute': [model_xgb_1, 'xgb', {'balanced': 'no'}],
+    'model_lgb_brute': [model_lgb_1, 'lgb', {'balanced': 'no'}],
+}
+
+dict_of_models_param_balanced = {
+    'model_logistic_balanced_param': [model_logistic_2, 'skl', {'balanced': 'yes:param'}],
+    'model_rdmfst_balanced_param': [model_rdmfst_2, 'skl', {'balanced': 'yes:param'}],
+    'model_xgb_balanced_param': [model_xgb_2, 'xgb', {'balanced': 'yes:param'}],
+    'model_lgb_balanced_param': [model_lgb_2, 'lgb', {'balanced': 'yes:param'}]
+}
+
+dict_of_models_smote_balanced = {
+    'model_logistic_balanced_smote': [model_logistic_3, 'skl', {'balanced': 'yes:smote'}],
+    'model_rdmfst_balanced_smote': [model_rdmfst_3, 'skl', {'balanced': 'yes:smote'}],
+    'model_xgb_balanced_smote': [model_xgb_3, 'xgb', {'balanced': 'yes:smote'}],
+    'model_lgb_balanced_smote': [model_lgb_3, 'lgb', {'balanced': 'yes:smote'}]
+}
+
+dict_of_models_smote_pipe_balanced = {
+    'model_logistic_pipe_balanced_smote': [model_logistic_4, 'skl', {'balanced': 'yes:smote_pipe'}],
+    'model_rdmfst_pipe_balanced_smote': [model_rdmfst_4, 'skl', {'balanced': 'yes:smote_pipe'}],
+    'model_xgb_pipe_balanced_smote': [model_xgb_4, 'xgb', {'balanced': 'yes:smote_pipe'}],
+    'model_lgb_pipe_balanced_smote': [model_lgb_4, 'lgb', {'balanced': 'yes:smote_pipe'}]
+}
+
+sampling_rate = 0.30
+X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial,
+                                                                        y_train_initial,
+                                                                        sampling=sampling_rate)
+
+# experience sur données non équilibrées
+exp_name = 'unbalanced data'
+
+dict_of_models_unbalanced = {
+    'model_xgb_brute': [model_xgb_1, 'xgb', {'balanced': 'no'}],
+    'model_lgb_brute': [model_lgb_1, 'lgb', {'balanced': 'no'}]
+}
+
+for model_name, elt in dict_of_models_unbalanced.items():
+    print(model_name)
+    model = elt[0]
+    model_library = elt[1]
+    tag_grid = elt[2]
+    run_name = exp_name + ' ' + model_name
+    EvalModel(model, X_train, y_train, X_valid, y_valid, exp_name, run_name, model_library, tag_grid)
+
+# experience sur données équilibrées par un hyperparamètre estimateur
+exp_name = 'hyperparam balanced data'
+
+for model_name, elt in dict_of_models_param_balanced.items():
+    print(model_name)
+    model = elt[0]
+    model_library = elt[1]
+    tag_grid = elt[2]
+    run_name = exp_name + ' ' + model_name
+    EvalModel(model, X_train, y_train, X_valid, y_valid, exp_name, run_name, model_library, tag_grid)
+
+# experience sur données équilibrées par SMOTE
+exp_name = 'smote balanced data'
+X_train_smote, y_train_smote = BalanceData(X_train, y_train)
+
+for model_name, elt in dict_of_models_smote_balanced.items():
+    print(model_name)
+    model = elt[0]
+    model_library = elt[1]
+    tag_grid = elt[2]
+    run_name = exp_name + ' ' + model_name
+    EvalModel(model, X_train_smote, y_train_smote, X_valid, y_valid, exp_name, run_name, model_library, tag_grid)
+
+# experience sur données équilibrées par SMOTE inclus dans pipeline (sans rediscretisation)
+exp_name = 'smote pipe balanced data'
+
+for model_name, elt in dict_of_models_smote_pipe_balanced.items():
+    print(model_name)
+    model = elt[0]
+    model_library = elt[1]
+    tag_grid = elt[2]
+    run_name = exp_name + ' ' + model_name
+    EvalModel(model, X_train_smote, y_train_smote, X_valid, y_valid, exp_name, run_name, model_library, tag_grid)
+
+
+# Optimisation des hyperparams balanced____________________________________________________________________
+
+
+dict_of_models_param_balanced = {
+    'model_logistic_balanced_param': [model_logistic_2, 'skl', {'balanced': 'yes:param'}],
+    'model_rdmfst_balanced_param': [model_rdmfst_2, 'skl', {'balanced': 'yes:param'}],
+    'model_xgb_balanced_param': [model_xgb_2, 'xgb', {'balanced': 'yes:param'}],
+    'model_lgb_balanced_param': [model_lgb_2, 'lgb', {'balanced': 'yes:param'}]
+}
+
+def log_in_mlflow(exp_name, dict_info, model_best):
+    for model_name, elt in dict_info.items():
+        print(model_name)
+        model = model_best
+        model_library = elt[1]
+        tag_grid = elt[2]
+        run_name = exp_name + ' ' + model_name
+        result = EvalModel(model, X_train, y_train, X_valid, y_valid, exp_name, run_name, model_library, tag_grid)
+    return result
+
+def GridSearchRun(exp_name, dict_info, params):
+    model_pipe = list(dict_info.values())[0][0]
+    search = GridSearchCV(model_pipe, params, scoring=scorer_metier_2, cv=4, verbose=1)
+    search.fit(X_train, y_train)
+    model_best = search.best_estimator_
+    print('grid_cv_best_score : ', search.best_score_)
+    
+    result = log_in_mlflow(exp_name, dict_info, model_best)
+    print(result.metrics)
+    
+    
+def RandomSearchRun(exp_name, dict_info, params, random_state, n_iter):
+    model_pipe = list(dict_info.values())[0][0]
+    random_search = RandomizedSearchCV(model_pipe, param_distributions=params,  
+                                       scoring=scorer_metier_2, n_iter=n_iter, 
+                                       cv=4, random_state=0, n_jobs=-1, verbose=10)
+    random_search.fit(X_train, y_train)
+    model_best = random_search.best_estimator_
+    print('random_cv_best_score : ', random_search.best_score_)
+    param_best = random_search.best_params_
+    result = log_in_mlflow(exp_name, dict_info, model_best)
+    print(result.metrics)
+    return param_best
+    
+    
+# LogisticRegression
+
+dict_info = {'model_logistic_balanced_param': [model_logistic_2, 'skl', {'balanced': 'yes:param',
+                                                                         'optimisation': 'yes:param'}]}
+params_reg = {
+    'classifier__penalty': ['l1', 'l2'],
+    'classifier__C': uniform(0.01, 1),
+    'classifier__solver': ['liblinear', 'saga'],
+    'classifier__max_iter': randint(100, 500)
+    }
+exp_name = 'random_cv_logistic'
+param_search = RandomSearchRun(exp_name, dict_info, params_reg, random_state = 99, n_iter = 20)
+print(param_search)
+
+
+# xgb
+
+dict_info = {'model_xgb_balanced_param': [model_xgb_2, 'xgb', {'balanced': 'yes:param',
+                                                                         'optimisation': 'yes:param'}]}
+
+param_xgb = {
+    'classifier__n_estimators': randint(100, 1000),  # Nombre d'arbres à construire
+    'classifier__max_depth': randint(3, 10),  # Profondeur maximale de l'arbre
+    'classifier__learning_rate': uniform(0.01, 0.3),  # Taux d'apprentissage
+    'classifier__subsample': uniform(0.5, 0.5),  # Sous-échantillonnage des observations lors de la construction de chaque arbre
+    'classifier__colsample_bytree': uniform(0.5, 0.5),  # Sous-échantillonnage des colonnes lors de la construction de chaque arbre
+    'classifier__gamma': uniform(0, 5),  # Réduction minimale de la fonction de perte requise pour faire une partition supplémentaire sur un feuille de l'arbre
+    'classifier__reg_alpha': uniform(0, 5),  # Terme de régularisation L1 sur les poids
+    'classifier__reg_lambda': uniform(0, 5)  # Terme de régularisation L2 sur les poids
+}
+
+exp_name = 'random_cv_xgb'
+param_search = RandomSearchRun(exp_name, dict_info, param_xgb, random_state = 399, n_iter = 15)
+print(param_search)
+
+
+# lgb
+
+dict_info = {'model_lgb_balanced_param': [model_lgb_2, 'lgb', {'balanced': 'yes:param',
+                                                                         'optimisation': 'yes:param'}]}
+
+param_lgb = {
+    'classifier__n_estimators': randint(100, 1000),  # Nombre d'arbres à construire
+    'classifier__max_depth': randint(3, 10),  # Profondeur maximale de l'arbre
+    'classifier__learning_rate': uniform(0.01, 0.3),  # Taux d'apprentissage
+    'classifier__subsample': uniform(0.5, 0.5),  # Sous-échantillonnage des observations lors de la construction de chaque arbre
+    'classifier__colsample_bytree': uniform(0.5, 0.5),  # Sous-échantillonnage des colonnes lors de la construction de chaque arbre
+    'classifier__min_child_samples': randint(5, 50),  # Nombre minimal d'échantillons requis pour chaque feuille
+    'classifier__reg_alpha': uniform(0, 5),  # Terme de régularisation L1 sur les poids
+    'classifier__reg_lambda': uniform(0, 5)  # Terme de régularisation L2 sur les poids
+}
+
+param_lgb_2 = {
+    'classifier__n_estimators': randint(260, 280),  # Nombre d'arbres à construire
+    'classifier__max_depth': [8],  # Profondeur maximale de l'arbre
+    'classifier__learning_rate': uniform(0.03, 0.06),  # Taux d'apprentissage
+    'classifier__subsample': uniform(0.48, 0.52),  # Sous-échantillonnage des observations lors de la construction de chaque arbre
+    'classifier__colsample_bytree': uniform(0.56, 0.59),  # Sous-échantillonnage des colonnes lors de la construction de chaque arbre
+    'classifier__min_child_samples': randint(9, 11),  # Nombre minimal d'échantillons requis pour chaque feuille
+    'classifier__reg_alpha': uniform(1, 1.5),  # Terme de régularisation L1 sur les poids
+    'classifier__reg_lambda': uniform(2.55, 2.65)  # Terme de régularisation L2 sur les poids
+}
+
+exp_name = 'random_cv_lgb'
+param_search = RandomSearchRun(exp_name, dict_info, param_lgb_2, random_state = 71, n_iter = 20)
+print(param_search)
+
+"""
+random_state = 71
+param_lgb_2
+classifier__colsample_bytree=0.6759835933912316, classifier__learning_rate=0.05212351023965785, classifier__max_depth=8, classifier__min_child_samples=10, classifier__n_estimators=260, classifier__reg_alpha=1.9342691433200043, classifier__reg_lambda=4.335198021714842, classifier__subsample=0.9854114012998262;
+"""
+model_best_lgbm_1 = LGBMClassifier(is_unbalance=True, random_state=71,
+                                 colsample_bytree=0.6759835933912316, 
+                                 learning_rate=0.05212351023965785, 
+                                 max_depth=8, 
+                                 min_child_samples=10, 
+                                 n_estimators=260, 
+                                 reg_alpha=1.9342691433200043, 
+                                 reg_lambda=4.335198021714842, 
+                                 subsample=0.9854114012998262)
+
+cv_score = cross_val_score(model_best_lgbm_1, X_train, 
+                                           y_train,cv=5, scoring=scorer_metier_2, 
+                                           verbose=10, n_jobs=-1)
+
+model_best_lgbm_1_fitted, metrics_grid_numeric, metrics_grid_tab = evaluation(model=model_best_lgbm_1,
+                                                           training_set=[
+                                                               X_train, y_train],
+                                                           testing_set=[
+                                                               X_valid, y_valid],
+                                                           thd=0.5,
+                                                           print_scores=True)
+
+model_best_pipe = imbpipeline([('classifier', model_best_lgbm_1_fitted)])
+
+dict_info_best = {'model_lgm_best': [model_best_pipe, 'lgb', {'balanced': 'yes:param',
+                                                                         'optimisation': 'yes:param'}]}
+
+result = log_in_mlflow(exp_name='best model', dict_info=dict_info_best, model_best=model_best_pipe)
+print(result.metrics)
+
+'''
+random_state = 53
+
+classifier__colsample_bytree=0.5794847918227599, 
+classifier__learning_rate=0.043112542349291544, 
+classifier__max_depth=8, 
+classifier__min_child_samples=10, 
+classifier__n_estimators=269, 
+classifier__reg_alpha=4.74785526725371, 
+classifier__reg_lambda=3.3126343347502214, 
+classifier__subsample=0.5067858178060549;
+'''
+# paramètrage kernel
+
+model_kernel = LGBMClassifier(n_estimators=10000, objective = 'binary', 
+                                is_unbalance=True, learning_rate = 0.05, 
+                                reg_alpha = 0.1, reg_lambda = 0.1, 
+                                subsample = 0.8, n_jobs = -1, random_state = 0)
+
+model_kernel_pipe = imbpipeline([('classifier', model_kernel)])
+
+setting_kernel = {'model_lgb_kernel': [model_kernel_pipe, 'lgb', {'balanced': 'yes:param',
+                                                                  'optimisation': 'yes:kernel'}]}
+
+result = log_in_mlflow(exp_name = "kernel_setting", dict_info=setting_kernel, model_best=model_kernel)
+print(result.metrics)
+
+{'classifier__colsample_bytree': 0.7368040226368553, 
+ 'classifier__learning_rate': 0.25027322559389326, 
+ 'classifier__max_depth': 8, 
+ 'classifier__min_child_samples': 24, 
+ 'classifier__n_estimators': 247, 
+ 'classifier__reg_alpha': 0.5913721293446661, 
+ 'classifier__reg_lambda': 3.199605106637619, 
+ 'classifier__subsample': 0.5716766437045232}
+
+#_______________________________________________________________________
+
+# Optimisation du seuil de classification_______________________________
+
+
+def Evaluate_Threshold(y_valid_hat, y_valid, y_train_hat, y_train, model, thd,
+                                   model_name, model_library, experience_name, phase_name):
+    """
+    training_set : TYPE -> liste à deux éléments
+     DESCRIPTION -> contient les données d'entraînement et la cible (ex: [X_train, y_train])
+     testing_set : TYPE -> liste à deux éléments
+     DESCRIPTION -> contient les données d'évaluation à prédire et la cible (ex: [X_test, y_test])
+     """
+       
+    metrics_grid_numeric, metrics_grid_tab = ComputeAndPrintPerformance(y_valid_hat,
+                                                y_valid, y_train_hat,
+                                                y_train, thd=thd,
+                                                print_scores=True)
+ 
+ 
+    tag_grid = {
+    "model_name" : str(model_name),
+    "steps" : " ",
+    "phase" : phase_name # "default baseline", 
+                        # "optimisation parameters", 
+                        # "optimisation threshold"
+                        # "test evaluation"
+    }
+    
+    signature = infer_signature(X_valid, y_valid)
+    
+    saving_mlflow(experience_name=experience_name,
+                 run_name = model_name + ' - ' + phase_name,
+                 model=model,
+                 signature=signature,
+                 model_library=model_library,
+                 metrics_grid_numeric=metrics_grid_numeric,
+                 metrics_grid_tab=metrics_grid_tab,
+                 tag_grid=tag_grid)
+
+
+def ThresholdSearch(model, model_name):
+    
+    y_valid_hat = model.predict_proba(X_valid)
+    y_train_hat = model.predict_proba(X_train)
+    
+    threshold = np.linspace(0.3, 0.55, 10)
+    for thd in threshold:
+        Evaluate_Threshold(y_valid_hat=y_valid_hat, y_valid=y_valid, y_train_hat=y_train_hat, 
+                           y_train=y_train, model = model, thd=thd,
+                           model_name=model_name, model_library='lgb', 
+                           experience_name="optimisation_threshold_restreint", phase_name='threshold restreint')
+
+# best_lgb_11_05 - Version 1 
+logged_model = 'runs:/520dd30d379142be866f7d46e277b178/model'
+best_lgb_11_05 = mlflow.lightgbm.load_model(logged_model)
+best_lgb_11_05_pipe = imbpipeline([('classifier', best_lgb_11_05)])
+ThresholdSearch(best_lgb_11_05_pipe, 'best_lgb_11_05')
+
+
+# best_lgb_11_05 - Version 1 
+logged_model = 'runs:/9dc1d1f54a9740688e427862f49c7e6d/model'
+best_lgb_11_05_2 = mlflow.lightgbm.load_model(logged_model)
+best_lgb_11_05_2_pipe = imbpipeline([('classifier', best_lgb_11_05_2)])
+ThresholdSearch(best_lgb_11_05_2_pipe, 'best_lgb_11_05_2')
+
+'''
+best_lgb_11_05_2 : 
+runs:/9dc1d1f54a9740688e427862f49c7e6d/model : meilleur modèle sur la validation avec un seuil de classification de 0.411
+
+'''
+# evaluation sur le set de test avec le meilleur modèle
+y_valid_hat = best_lgb_11_05_2.predict_proba(X_valid)
+y_test_hat = best_lgb_11_05_2.predict_proba(X_test)
+best_threshold = 0.411
+Evaluate_Threshold(y_valid_hat=y_test_hat, y_valid=y_test, y_train_hat=y_valid_hat, 
+                   y_train=y_valid, model = best_lgb_11_05_pipe, thd=best_threshold,
+                   model_name='best_lgb_11_05_2', model_library='lgb', 
+                   experience_name="Evaluation test 30% data", phase_name='evaluation test')
+
+# matrice de confusion
+y_pred_thd = np.array([y_test_hat[:,1] > best_threshold]).astype(int)[0]
+
+conf_mat_thd = confusion_matrix(y_test, y_pred_thd, normalize='all')
+sns.heatmap(conf_mat_thd, annot=True, cbar=False)
+
+'''
 def RapidEval(classifier, X, y, cv, scorers, return_train_score=False):
     scores = cross_validate(classifier, X, y, cv=cv, scoring=scorers, return_train_score=return_train_score)
     return scores.mean()
@@ -458,7 +946,7 @@ X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_
                                                                         sampling=0.01)
 
 RapidEval(model_xgb_essai, X_train, y_train, 10, scorers, True)
-
+'''
 
 '''
 
