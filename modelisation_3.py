@@ -49,6 +49,8 @@ from sklearn.impute import IterativeImputer
 from sklearn.linear_model import BayesianRidge
 
 from scipy.stats import randint, uniform
+import plotly
+import plotly.graph_objects as go
 
 from time import time
 
@@ -58,6 +60,8 @@ plt.rcParams['font.size'] = 22
 
 # Suppress warnings from pandas
 warnings.filterwarnings('ignore')
+
+import shap
 
 # Memory management
 
@@ -236,7 +240,8 @@ def ComputeAndPrintPerformance(y_valid_hat, y_valid, y_train_hat, y_train, thd=0
         'FP' : FPr,
         'TP' : TPr,
         'TN' : TNr,
-        'precision' : precision
+        'precision' : precision,
+        'example_count' : len(y_valid)
     }
     metrics_grid_tab = {
         'confusion_matrix': confusion_mat,
@@ -920,207 +925,153 @@ Evaluate_Threshold(y_valid_hat=y_test_hat, y_valid=y_test, y_train_hat=y_valid_h
                    model_name='best_lgb_11_05_2', model_library='lgb', 
                    experience_name="Evaluation test 30% data", phase_name='evaluation test')
 
-# matrice de confusion
+# matrice de confusion sur les données de test avec 30% des données
 y_pred_thd = np.array([y_test_hat[:,1] > best_threshold]).astype(int)[0]
-
-conf_mat_thd = confusion_matrix(y_test, y_pred_thd, normalize='all')
+conf_mat_thd = confusion_matrix(y_test, y_pred_thd, normalize='true')
 sns.heatmap(conf_mat_thd, annot=True, cbar=False)
 
-'''
-def RapidEval(classifier, X, y, cv, scorers, return_train_score=False):
-    scores = cross_validate(classifier, X, y, cv=cv, scoring=scorers, return_train_score=return_train_score)
-    return scores.mean()
+
+# matrice de confusion sur les données de test avec tout le reste des données non vu dans l'entraînement
+# tout les index
+all_index = set(train_complete.index.tolist())
+# index d'entraînement et de validation
+seen_index = set(X_train.index.tolist()) | set(X_valid.index.tolist())
+# unseen index
+unseen_index = all_index - seen_index
+unseen_index_list = list(unseen_index)
+# vérification
+print('len(all_index) : ', len(all_index))
+print('len(seen_index) : ', len(seen_index))
+print('len(unseen_index_list) : ', len(unseen_index_list))
+print('len(all_index) - len(seen_index) : ', len(all_index) - len(seen_index))
+
+# dataframe des données non vues
+full_unseen_data = train_complete.loc[unseen_index_list, :]
+X_full_unseen = full_unseen_data.drop('TARGET', axis=1)
+y_full_unseen = full_unseen_data.TARGET
+
+# prediction sur les données non vues
+y_test_full_unseen_hat = best_lgb_11_05_2.predict_proba(X_full_unseen)
+
+y_pred_unseen_thd = np.array([y_test_full_unseen_hat[:,1] > best_threshold]).astype(int)[0]
+conf_mat_thd = confusion_matrix(y_full_unseen, y_pred_unseen_thd, normalize='true')
+sns.heatmap(conf_mat_thd, annot=True, cbar=False)
+
+# évaluation dans mlflow
+Evaluate_Threshold(y_valid_hat=y_test_full_unseen_hat, y_valid=y_full_unseen, y_train_hat=y_valid_hat, 
+                   y_train=y_valid, model = best_lgb_11_05_pipe, thd=best_threshold,
+                   model_name='best_lgb_11_05_2', model_library='lgb', 
+                   experience_name="Evaluation test 75% data", phase_name='evaluation test full')
 
 
-scorers = {
-    'score_metier': scorer_metier,
-    'accuracy': make_scorer(accuracy_score, greater_is_better=True),
-    'precision': make_scorer(precision_score, greater_is_better=True),
-    'recall': make_scorer(recall_score, greater_is_better=True),
-    'f1': make_scorer(f1_score, greater_is_better=True),
-    'roc auc': make_scorer(roc_auc_score, greater_is_better=True)
-}
 
-X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial,
-                                                                        y_train_initial,
-                                                                        sampling=0.01)
+# analyse de la feature importance du meilleur modèle_________________________________
+def Predict_Class(id_customer, y_hat, threshold = 0.411):
+    return (y_hat[id_customer,1] > threshold).astype(int)
 
-RapidEval(model_xgb_essai, X_train, y_train, 10, scorers, True)
-'''
 
-'''
+shap.initjs()
+# feature importance globale__________________________________________________________
+# Create a SHAP explainer
+explainer = shap.TreeExplainer(best_lgb_11_05_2)
 
-# premières expériences : -----------------------------------------------------
-    # entraînement baseline sans optimisation
-    # sur une petite partie des données
+# SHAP sur l'entraînement--------------------------------------------------------------------------------------
+# Affichage des valeurs globales absolues de SHAP pour les caractéristiques les plus importantes---------------
+shap_values = explainer.shap_values(X_train)
 
-dict_of_models = {
-    'model_logistic_1': [model_logistic_1, 'skl'],
-    'model_logistic_2': [model_logistic_2, 'skl'],
-    'model_rdmfst_1': [model_rdmfst_1, 'skl'],
-    'model_rdmfst_2': [model_rdmfst_2, 'skl'],
-    'model_xgb_1': [model_xgb_1, 'xgb'],
-    'model_xgb_2': [model_xgb_2, 'xgb'],
-    'model_lgb_1': [model_lgb_1, 'lgb'],
-    'model_lgb_2': [model_lgb_2, 'lgb']
-}
-
-# avec 1, 10, 30, 50 et 70% des données
-sampling_values = [0.01, 0.1, 0.3, 0.5, 0.7]
-
-for samp in sampling_values:
+def PlotAbsolute_GreaterSHAP(data, titre):
+    shap_values = explainer.shap_values(data)
+    importance_abs_array = np.mean(np.abs(shap_values), axis=0)
+    explainer_df = pd.DataFrame(data = importance_abs_array, index = data.columns, columns= ['absolute_importance_mean'])
+    explainer_df_sort = explainer_df.sort_values('absolute_importance_mean', ascending=True)
+    explainer_df_sort_head = explainer_df_sort.tail(25)
     
-    mlflow_generation(experience_name = f"first exp {samp*100}% data", 
-                      phase_name = "default baseline", 
-                      dict_of_models = dict_of_models,
-                      sampling_rate = samp, 
-                      threshold=0.5,
-                      print_scores=False)
-
-
-# deuxieme expérience : -----------------------------------------------------
-    # entraînement des meilleurs estimateurs par defaut sur 30% des données
-    # en optimisant les hyperparamètres
-        # retenus : model_logistic_1, model_xgb_2  et model_lgb_2
-
-        result = mlflow.evaluate(
-            model_info.model_uri,
-            eval_data,
-            targets="TARGET",
-            model_type="classifier",
-            evaluators=["default"],
-        )
-
-def mlflow_generationGridCV(experience_name, phase_name, 
-                      dict_of_models, sampling_rate, params,  
-                      threshold=0.5,
-                      print_scores=False):
-    """
-
-    Parameters
-    ----------
-    experience_name : str
-        nom à donner à l'expérience, en lien avec la phase d'étude.
-    phase_name : str
-        phase de l'étude : "default baseline", "optimisation parameters", 
-        "optimisation threshold" ou "test evaluation".
-    dict_of_models : dict
-        dictionnaire des pipelines avec estimateur.
-    sampling_rate : float
-        proportion des données injectée dans la fonction.
-        Utilisé dans un premier temps pour estimer un compromis performance/temps de calcul.
-    params : dict
-        dictionnaire des hyperparamètres.
-    threshold : float, optional
-        seuil de classification des modèles. The default is 0.5.
-
-    Returns
-    -------
-    None.
-
-    """
+    vals = explainer_df_sort_head.values
+    vals_scalaire = [vals[i][0] for i in range(len(vals))]
     
-    X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial,
-                                                                            y_train_initial,
-                                                                            sampling=sampling_rate)
+    ticks_color = (0.30, 0.2, 0.0)
     
+    plt.figure(figsize=(10,6))
+    plt.barh(explainer_df_sort_head.index.tolist(), vals_scalaire, color=(1.0, 0.5, 0.15), edgecolor='gray')
+    plt.xlabel(f'mean absolute shap importance ({data.shape[0]} instances)', fontsize=12, fontweight='bold')
+    plt.ylabel('Features', fontsize=12, fontweight='bold')
+    plt.title(titre, fontsize=15, fontweight='bold')
+    plt.yticks(fontsize=9, color=ticks_color)
+    plt.xticks(fontsize=10, color=ticks_color)
+    plt.grid(axis='x')
+    plt.show()
+
+PlotAbsolute_GreaterSHAP(X_train, "Diagramme des plus grandes contributions moyennes absolues dans l'entraînement")
+
+# summary plot : degré d'importance globale -------------------------------------------------------------------
+plt.title("Global Summary Plot For Best Model", fontsize=16)
+shap.summary_plot(shap_values, X_train, plot_size=[15, 9])
+
+# SHAP sur le test---------------------------------------------------------------------------------------------
+PlotAbsolute_GreaterSHAP(X_test, 'Diagramme des plus grandes contributions moyennes absolues dans les prédictions')
+# summary_plot-------------------------------------
+shap_values_test = explainer.shap_values(X_test)
+
+plt.title("Global Summary Plot For Best Model", fontsize=16)
+shap.summary_plot(shap_values_test, X_test, plot_size=[15, 9])
+
+# en barres
+shap.summary_plot(shap_values_test, X_test, plot_type="bar", plot_size=[15, 9])
+
+
+# test ____________________________
+shap.summary_plot(shap_values_test[0], X_test, plot_type="bar", plot_size=[15, 9])
+
+explainer_bis = shap.Explainer(best_lgb_11_05_2)
+shap_values_bis = explainer_bis.shap_values(X_test)
+
+shap.summary_plot(shap_values_bis, X_test)
+shap.summary_plot(shap_values_bis[0], X_test)
+
+
+print(Predict_Class(id_customer=0, y_hat=y_test_hat, threshold = 0.411))
+y_test_hat[0,0]
+
+# force_plot-----------
+def PlotLocal_Importance(instance_ind):
+    shap.force_plot(
+        explainer.expected_value, shap_values_test[instance_ind, :], X_test.iloc[instance_ind, :], matplotlib=True, show=True
+    )
     
-    
-    print(X_train.shape)
-    print(X_valid.shape)
-    
-    
-    for name, model_pipe in dict_of_models.items():
-        
-        search = GridSearchCV(model_pipe, params, scoring=scorer_metier, cv=4)
-        search.fit(X_train, y_train)
-        model_best = search.best_estimator_
-        
-        model, metrics_grid_numeric, metrics_grid_tab = evaluation(model=model_best,
-                                                                   training_set=[
-                                                                       X_train, y_train],
-                                                                   testing_set=[
-                                                                       X_valid, y_valid],
-                                                                   thd=threshold,
-                                                                   print_scores=print_scores)
-        
-        tag_grid = {
-            "model_name" : str(name),
-            "steps" : str(list(model_pipe[0].named_steps.keys())),
-            "phase" : phase_name # "default baseline", 
-                                # "optimisation parameters", 
-                                # "optimisation threshold"
-                                # "test evaluation"
-            }
-        
-        saving_mlflow(experience_name=experience_name,
-                     run_name=experience_name + ' - ' + phase_name + ' - ' + tag_grid["model_name"],
-                     model=model,
-                     model_library=model_pipe[1],
-                     metrics_grid_numeric=metrics_grid_numeric,
-                     metrics_grid_tab=metrics_grid_tab,
-                     tag_grid=tag_grid)
-        
-dict_of_models_phase_2 = {
-    'model_logistic_1': [model_logistic_1, 'skl'],
-    'model_xgb_2': [model_xgb_2, 'xgb'],
-    'model_lgb_2': [model_lgb_2, 'lgb']
-}
+# analyse local d'un client qui ne rembourse pas
+print(y_test.iloc[4])
+PlotLocal_Importance(4)
 
-params = {
-    'classifier__penalty': ['l1', 'l2'],
-    'classifier__C': [0.001, 0.01, 0.1, 1, 10],
-    'classifier__solver': ['liblinear', 'saga'],
-    'classifier__max_iter': [100, 200, 300],
-    'classifier__class_weight': [None, 'balanced']
-    }
-search = GridSearchCV(model_logistic_1, params, scoring=scorer_metier, cv=4)
-search.fit(X_train, y_train)
-model = search.best_estimator_
+# decision_plot entre sex et score ext 2
+shap.dependence_plot("application_CODE_GENDER_M_sum", shap_values_test, X_test,interaction_index="EXT_SOURCE_2_y")
 
-mlflow_generation(experience_name = "second exp 30% data", 
-                  phase_name = "optimisation parameters", 
-                  dict_of_models = dict_of_models_phase_2,
-                  sampling_rate = 0.3, 
-                  threshold=0.5,
-                  print_scores=False)
+# decision_plot entre credit term et score ext 2
+shap.dependence_plot("CREDIT_TERM", shap_values_test, X_test,interaction_index="EXT_SOURCE_2_y")
 
-# troisième expérience : ----------------------------------------------------
-    # sélection des meileurs modèles avec optimisation des hyperparamètres
-    # et optimisation de leur seuil de classification
-    
-    
-    
-# quatrième et dernière expérience : ---------------------------------------
-    # sélection des meileurs modèles après optimisation des seuil
-    # évaluation des performances sur le set de test jamais vu par les modèles
-    
-    
+
+# ci-dessous pour l'explication des graphiques shap
+path_data = "C:\\Users\\Utilisateur\\formation_datascientist\\projet_7_implementez_un_modèle_de_scoring\\projet_7_implementez_un_modèle_de_scoring\\project_data\\"
+table_feature_desc = pd.read_csv(path_data + 'HomeCredit_columns_description.csv', sep=',', encoding='latin1')
+table_sample_submission = pd.read_csv(path_data + 'sample_submission.csv', sep=',', encoding='latin1')
+table_application_train = pd.read_csv(path_data + 'application_train.csv', sep=',', encoding='latin1')
+
+
+# et ci-dessous tentative pour rendre les shap local intéractif, sans succès
+"""
+force_data = shap.force_plot(
+    explainer.expected_value, shap_values_test[instance_ind, :], X_test.iloc[instance_ind, :], matplotlib=False, show=False
+)
+
+force_data['outNames']
+
+force_data_copy = {str(key) : value for key, value in force_data.items() if key not in ['outValue', 'link', 'outNames', 'baseValue']}
+fig = go.Figure(
+    data=[go.force_data],
+    layout_title_text="A Figure Displaying Itself"
+)
+# Afficher le graphique interactif
+fig.show()
+"""
 
 
 
-
-for name, model in dict_of_models.items():
-  print(name)
-  evaluation(model)
-  
-
-
-def evaluationCV(model, params, random = False):
-
-  search = GridSearchCV(model, params, scoring=scorer_metier, cv=4)
-  search.fit(X_train, y_train)
-  ypred_valid = model.predict(X_valid)
-  ypred_train = model.predict(X_train)
-
-  print(confusion_matrix(y_valid, ypred_valid))
-  print(classification_report(y_valid, ypred_valid))
-  print('score_metier' , score_metier(y_valid, ypred_valid))
-  train_recall, valid_recall = round(recall_score(y_train, ypred_train), 2), round(recall_score(y_valid, ypred_valid), 2)
-  print("train recall = ", train_recall)
-  print("valid recall = ", valid_recall)
-  print('delta train - valid = ', round(train_recall - valid_recall, 2))
-  overfit_indicator = round(((1 - train_recall) + (valid_recall / train_recall)) / 2, 2) # overfitting si proche de 0, bon si proche de 1
-  print('overfit_indicator : ', overfit_indicator)
-
-'''
