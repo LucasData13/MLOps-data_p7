@@ -905,7 +905,7 @@ best_lgb_11_05_pipe = imbpipeline([('classifier', best_lgb_11_05)])
 ThresholdSearch(best_lgb_11_05_pipe, 'best_lgb_11_05')
 
 
-# best_lgb_11_05 - Version 1 
+# best_lgb_11_05_2 - Version 1 
 logged_model = 'runs:/9dc1d1f54a9740688e427862f49c7e6d/model'
 best_lgb_11_05_2 = mlflow.lightgbm.load_model(logged_model)
 best_lgb_11_05_2_pipe = imbpipeline([('classifier', best_lgb_11_05_2)])
