@@ -4,57 +4,49 @@ Created on Wed May 15 15:59:02 2024
 
 @author: Utilisateur
 """
+# 1. Library imports
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 import pandas as pd
-import numpy as np
-import mlflow.lightgbm
 import mlflow
-import pickle
-from flask import Flask, request, jsonify
+import mlflow.lightgbm
+import os
 
+# Configurer les variables d'environnement pour AWS S3
 '''
-# Charger le modèle de prédiction
-with open('model.pkl', 'rb') as f:
-    model = pickle.load(f)
+os.environ['MLFLOW_S3_ENDPOINT_URL'] = 'https://s3.amazonaws.com'
+os.environ['AWS_ACCESS_KEY_ID'] = '<your-access-key>'
+os.environ['AWS_SECRET_ACCESS_KEY'] = '<your-secret-key>'
 '''
-# import du modèle local
-logged_model = 'runs:/9dc1d1f54a9740688e427862f49c7e6d/model'
-model = mlflow.lightgbm.load_model(logged_model)
 
-# Définir le seuil optimisé (exemple)
-optimal_threshold = 0.411
+app = FastAPI()
 
+class ClientData(BaseModel):
+    features: list[float]
 
-# création de l'API Flask-------------------------
-app = Flask(__name__)
+def load_model():
+    '''
+    model_uri = "s3://<your-bucket-name>/<path-to-model>"
+    model = mlflow.sklearn.load_model(model_uri)
+    '''
+    model_uri = "models:/best_model_11_05_2@champion" 
+    model = mlflow.lightgbm.load_model(model_uri)
+    return model
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    # Récupérer les données envoyées en POST sous forme de JSON
-    data = request.get_json()
-    
-    # Assurez-vous que les données sont au format attendu
+model = load_model()
+
+@app.post("/predict")
+async def predict(client_data: ClientData):
     try:
-        # Extraire les caractéristiques (features) des données
-        features = np.array(data['features']).reshape(1, -1)
-    except KeyError:
-        return jsonify({'error': 'Les données doivent contenir une clé "features".'}), 400
-    
-    # Faire la prédiction de la probabilité
-    probability_of_default = model.predict_proba(features)[0, 1]
-    
-    # Déterminer la classe en fonction du seuil optimisé
-    if probability_of_default >= optimal_threshold:
-        decision = 'refusé'
-    else:
-        decision = 'accepté'
-    
-    # Retourner les résultats sous forme de JSON
-    result = {
-        'probability_of_default': probability_of_default,
-        'decision': decision
-    }
-    
-    return jsonify(result)
-
+        input_data = pd.DataFrame([client_data.features])
+        probability = model.predict_proba(input_data)[0][1]
+        prediction = int(probability > 0.411)
+        return {"prediction": prediction, "probability": probability}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+# 4. Run the API with uvicorn
+#    Will run on http://127.0.0.1:8000
 if __name__ == '__main__':
-    app.run(debug=True)
+    uvicorn.run(app, host='127.0.0.1', port=8000)
