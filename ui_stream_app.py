@@ -8,378 +8,101 @@ Created on Thu May 16 23:30:24 2024
 import streamlit as st
 import requests
 import pandas as pd
+import plotly.graph_objects as go
+from stream_mod.stream_module import PlotScore, DataClients
+import numpy as np
+import json
+from PIL import Image
+import io
 
 st.title("Prédiction de Défaut de Crédit")
 
-# liste des caractéristiques clients
-caracteristiques = ['FLAG_PHONE',
- 'FLAG_EMAIL',
- 'FLAG_DOCUMENT_3',
- 'FLAG_DOCUMENT_13',
- 'FLAG_DOCUMENT_14',
- 'FLAG_DOCUMENT_16',
- 'application_ORGANIZATION_TYPE_Realtor_sum',
- 'application_ORGANIZATION_TYPE_Industrytype12_sum',
- 'application_NAME_EDUCATION_TYPE_Lowersecondary_sum',
- 'application_ORGANIZATION_TYPE_Industrytype9_sum',
- 'application_ORGANIZATION_TYPE_Bank_sum',
- 'application_NAME_HOUSING_TYPE_Officeapartment_sum',
- 'application_ORGANIZATION_TYPE_Hotel_sum',
- 'application_OCCUPATION_TYPE_LowskillLaborers_sum',
- 'application_OCCUPATION_TYPE_Highskilltechstaff_sum',
- 'application_ORGANIZATION_TYPE_Police_sum',
- 'application_ORGANIZATION_TYPE_Transporttype3_sum',
- 'application_ORGANIZATION_TYPE_Tradetype2_sum',
- 'application_NAME_EDUCATION_TYPE_Incompletehigher_sum',
- 'application_NAME_HOUSING_TYPE_Municipalapartment_sum',
- 'application_OCCUPATION_TYPE_Medicinestaff_sum',
- 'application_FONDKAPREMONT_MODE_regoperspecaccount_sum',
- 'application_ORGANIZATION_TYPE_SecurityMinistries_sum',
- 'application_ORGANIZATION_TYPE_Military_sum',
- 'application_FONDKAPREMONT_MODE_orgspecaccount_sum',
- 'application_OCCUPATION_TYPE_Salesstaff_sum',
- 'application_ORGANIZATION_TYPE_Kindergarten_sum',
- 'application_ORGANIZATION_TYPE_Construction_sum',
- 'application_ORGANIZATION_TYPE_Selfemployed_sum',
- 'application_OCCUPATION_TYPE_Drivers_sum',
- 'application_WALLSMATERIAL_MODE_Panel_sum',
- 'application_WEEKDAY_APPR_PROCESS_START_FRIDAY_sum',
- 'application_WEEKDAY_APPR_PROCESS_START_SATURDAY_sum',
- 'application_OCCUPATION_TYPE_Accountants_sum',
- 'application_NAME_TYPE_SUITE_Spousepartner_sum',
- 'application_NAME_FAMILY_STATUS_Civilmarriage_sum',
- 'application_ORGANIZATION_TYPE_School_sum',
- 'application_NAME_INCOME_TYPE_Stateservant_sum',
- 'application_NAME_FAMILY_STATUS_Married_sum',
- 'application_OCCUPATION_TYPE_Corestaff_sum',
- 'application_WEEKDAY_APPR_PROCESS_START_MONDAY_sum',
- 'application_WALLSMATERIAL_MODE_Stonebrick_sum',
- 'application_ORGANIZATION_TYPE_BusinessEntityType3_sum',
- 'application_WEEKDAY_APPR_PROCESS_START_WEDNESDAY_sum',
- 'application_CODE_GENDER_M_sum',
- 'application_OCCUPATION_TYPE_Laborers_sum',
- 'application_NAME_INCOME_TYPE_Working_sum',
- 'application_NAME_TYPE_SUITE_Unaccompanied_sum',
- 'application_NAME_EDUCATION_TYPE_Secondarysecondaryspecial_sum',
- 'application_FLAG_OWN_REALTY_Y_sum',
- 'application_NAME_CONTRACT_TYPE_Cashloans_sum',
- 'application_NAME_HOUSING_TYPE_Houseapartment_sum',
- 'application_DAYS_REGISTRATION_mean',
- 'application_DAYS_ID_PUBLISH_mean',
- 'application_DAYS_LAST_PHONE_CHANGE_mean',
- 'application_FLAG_DOCUMENT_18_mean',
- 'application_REG_REGION_NOT_WORK_REGION_mean',
- 'application_REG_CITY_NOT_LIVE_CITY_mean',
- 'application_REG_CITY_NOT_WORK_CITY_mean',
- 'application_AMT_REQ_CREDIT_BUREAU_WEEK_max',
- 'application_AMT_REQ_CREDIT_BUREAU_MON_max',
- 'application_AMT_REQ_CREDIT_BUREAU_QRT_max',
- 'application_OWN_CAR_AGE_count',
- 'application_FLAG_WORK_PHONE_mean',
- 'application_OWN_CAR_AGE_sum',
- 'application_NONLIVINGAPARTMENTS_MEDI_sum',
- 'application_NONLIVINGAREA_MEDI_mean',
- 'application_COMMONAREA_MEDI_sum',
- 'application_REGION_POPULATION_RELATIVE_mean',
- 'application_LIVINGAPARTMENTS_MODE_sum',
- 'application_APARTMENTS_MODE_mean',
- 'application_LANDAREA_MODE_mean',
- 'application_BASEMENTAREA_MODE_mean',
- 'application_ENTRANCES_MEDI_mean',
- 'application_FLOORSMAX_AVG_mean',
- 'application_FLOORSMIN_AVG_sum',
- 'application_YEARS_BEGINEXPLUATATION_MODE_mean',
- 'application_AMT_REQ_CREDIT_BUREAU_YEAR_max',
- 'application_CNT_FAM_MEMBERS_mean',
- 'application_DEF_30_CNT_SOCIAL_CIRCLE_max',
- 'application_OBS_30_CNT_SOCIAL_CIRCLE_max',
- 'application_REGION_RATING_CLIENT_mean',
- 'application_HOUR_APPR_PROCESS_START_mean',
- 'application_AMT_INCOME_TOTAL_mean',
- 'application_AMT_CREDIT_mean',
- 'EXT_SOURCE_2_y',
- 'EXT_SOURCE_3_y',
- 'EXT_SOURCE_2DAYS_BIRTH2',
- 'DAYS_BIRTH3',
- 'ANNUITY_INCOME_PERCENT',
- 'CREDIT_TERM',
- 'DAYS_EMPLOYED_PERCENT',
- 'bureau_CREDIT_TYPE_Mortgage_sum',
- 'bureau_CREDIT_TYPE_Microloan_mean',
- 'bureau_CREDIT_TYPE_Microloan_sum',
- 'bureau_CREDIT_TYPE_Carloan_sum',
- 'bureau_CREDIT_TYPE_Creditcard_sum',
- 'bureau_CREDIT_ACTIVE_Closed_mean',
- 'bureau_CREDIT_TYPE_Consumercredit_mean',
- 'bureau_CREDIT_ACTIVE_Active_sum',
- 'bureau_DAYS_CREDIT_ENDDATE_min',
- 'bureau_DAYS_ENDDATE_FACT_max',
- 'bureau_DAYS_CREDIT_UPDATE_mean',
- 'bureau_DAYS_CREDIT_UPDATE_max',
- 'bureau_CREDIT_DAY_OVERDUE_sum',
- 'bureau_AMT_CREDIT_SUM_OVERDUE_sum',
- 'bureau_CNT_CREDIT_PROLONG_sum',
- 'bureau_AMT_CREDIT_SUM_LIMIT_min',
- 'bureau_AMT_CREDIT_MAX_OVERDUE_count',
- 'bureau_AMT_CREDIT_SUM_LIMIT_max',
- 'bureau_DAYS_CREDIT_count',
- 'bureau_DAYS_CREDIT_ENDDATE_max',
- 'bureau_AMT_ANNUITY_sum',
- 'bureau_AMT_CREDIT_SUM_DEBT_mean',
- 'bureau_AMT_CREDIT_SUM_min',
- 'bureau_AMT_CREDIT_SUM_DEBT_sum',
- 'bureau_AMT_CREDIT_SUM_sum',
- 'bureau_AMT_CREDIT_MAX_OVERDUE_max',
- 'client_bureau_balance_MONTHS_BALANCE_max_sum',
- 'client_bureau_balance_STATUS_2_sum_sum',
- 'client_bureau_balance_STATUS_1_sum_sum',
- 'client_bureau_balance_STATUS_X_sum_sum',
- 'client_bureau_balance_MONTHS_BALANCE_count_sum',
- 'previous_NAME_GOODS_CATEGORY_DirectSales_mean',
- 'previous_NAME_CASH_LOAN_PURPOSE_Furniture_mean',
- 'previous_CODE_REJECT_REASON_SYSTEM_sum',
- 'previous_NAME_GOODS_CATEGORY_SportandLeisure_sum',
- 'previous_NAME_CASH_LOAN_PURPOSE_Buyinganewcar_mean',
- 'previous_NAME_CASH_LOAN_PURPOSE_Urgentneeds_mean',
- 'previous_CODE_REJECT_REASON_VERIF_sum',
- 'previous_CODE_REJECT_REASON_SCOFR_sum',
- 'previous_NAME_CASH_LOAN_PURPOSE_Repairs_mean',
- 'previous_NAME_SELLER_INDUSTRY_Industry_sum',
- 'previous_PRODUCT_COMBINATION_CashStreetmiddle_mean',
- 'previous_CHANNEL_TYPE_Channelofcorporatesales_mean',
- 'previous_NAME_CASH_LOAN_PURPOSE_Other_mean',
- 'previous_CODE_REJECT_REASON_SCO_sum',
- 'previous_NAME_CONTRACT_STATUS_Unusedoffer_sum',
- 'previous_NAME_GOODS_CATEGORY_ClothingandAccessories_sum',
- 'previous_PRODUCT_COMBINATION_CashStreetlow_mean',
- 'previous_NAME_GOODS_CATEGORY_Computers_mean',
- 'previous_NAME_TYPE_SUITE_Children_sum',
- 'previous_CHANNEL_TYPE_Contactcenter_sum',
- 'previous_PRODUCT_COMBINATION_POSindustrywithoutinterest_sum',
- 'previous_NAME_YIELD_GROUP_low_action_mean',
- 'previous_WEEKDAY_APPR_PROCESS_START_WEDNESDAY_mean',
- 'previous_NAME_GOODS_CATEGORY_PhotoCinemaEquipment_sum',
- 'previous_NAME_TYPE_SUITE_Spousepartner_sum',
- 'previous_PRODUCT_COMBINATION_POShouseholdwithoutinterest_sum',
- 'previous_WEEKDAY_APPR_PROCESS_START_WEDNESDAY_sum',
- 'previous_NAME_GOODS_CATEGORY_Gardening_sum',
- 'previous_PRODUCT_COMBINATION_CashStreethigh_mean',
- 'previous_NAME_PRODUCT_TYPE_walkin_mean',
- 'previous_WEEKDAY_APPR_PROCESS_START_MONDAY_mean',
- 'previous_PRODUCT_COMBINATION_CashStreethigh_sum',
- 'previous_CHANNEL_TYPE_APCashloan_sum',
- 'previous_NAME_PRODUCT_TYPE_walkin_sum',
- 'previous_WEEKDAY_APPR_PROCESS_START_MONDAY_sum',
- 'previous_NAME_GOODS_CATEGORY_ConstructionMaterials_mean',
- 'previous_WEEKDAY_APPR_PROCESS_START_TUESDAY_mean',
- 'previous_NAME_GOODS_CATEGORY_AudioVideo_mean',
- 'previous_PRODUCT_COMBINATION_CashXSellhigh_sum',
- 'previous_CODE_REJECT_REASON_LIMIT_sum',
- 'previous_NAME_CONTRACT_STATUS_Refused_sum',
- 'previous_PRODUCT_COMBINATION_CardXSell_sum',
- 'previous_WEEKDAY_APPR_PROCESS_START_TUESDAY_sum',
- 'previous_NAME_CONTRACT_TYPE_Revolvingloans_sum',
- 'previous_NAME_YIELD_GROUP_XNA_mean',
- 'previous_WEEKDAY_APPR_PROCESS_START_THURSDAY_mean',
- 'previous_WEEKDAY_APPR_PROCESS_START_THURSDAY_sum',
- 'previous_CHANNEL_TYPE_RegionalLocal_mean',
- 'previous_CHANNEL_TYPE_RegionalLocal_sum',
- 'previous_NAME_SELLER_INDUSTRY_Furniture_mean',
- 'previous_NAME_GOODS_CATEGORY_ConsumerElectronics_mean',
- 'previous_PRODUCT_COMBINATION_POSindustrywithinterest_mean',
- 'previous_WEEKDAY_APPR_PROCESS_START_SUNDAY_mean',
- 'previous_NAME_SELLER_INDUSTRY_Consumerelectronics_mean',
- 'previous_NAME_TYPE_SUITE_Unaccompanied_mean',
- 'previous_NAME_YIELD_GROUP_middle_mean',
- 'previous_PRODUCT_COMBINATION_POSindustrywithinterest_sum',
- 'previous_WEEKDAY_APPR_PROCESS_START_SUNDAY_sum',
- 'previous_NAME_SELLER_INDUSTRY_Consumerelectronics_sum',
- 'previous_PRODUCT_COMBINATION_CashXSelllow_sum',
- 'previous_NAME_PRODUCT_TYPE_xsell_sum',
- 'previous_NAME_TYPE_SUITE_Unaccompanied_sum',
- 'previous_NAME_YIELD_GROUP_middle_sum',
- 'previous_NAME_SELLER_INDUSTRY_Autotechnology_sum',
- 'previous_PRODUCT_COMBINATION_POSotherwithinterest_sum',
- 'previous_NAME_CLIENT_TYPE_New_mean',
- 'previous_NAME_CLIENT_TYPE_New_sum',
- 'previous_CHANNEL_TYPE_Stone_mean',
- 'previous_WEEKDAY_APPR_PROCESS_START_SATURDAY_mean',
- 'previous_NAME_YIELD_GROUP_low_normal_mean',
- 'previous_CHANNEL_TYPE_Stone_sum',
- 'previous_WEEKDAY_APPR_PROCESS_START_SATURDAY_sum',
- 'previous_NAME_YIELD_GROUP_low_normal_sum',
- 'previous_NAME_YIELD_GROUP_high_mean',
- 'previous_NAME_YIELD_GROUP_high_sum',
- 'previous_NAME_SELLER_INDUSTRY_Connectivity_mean',
- 'previous_NAME_SELLER_INDUSTRY_Connectivity_sum',
- 'previous_CHANNEL_TYPE_Countrywide_mean',
- 'previous_WEEKDAY_APPR_PROCESS_START_FRIDAY_mean',
- 'previous_NAME_TYPE_SUITE_Family_mean',
- 'previous_NAME_PAYMENT_TYPE_Cashthroughthebank_mean',
- 'previous_CHANNEL_TYPE_Countrywide_sum',
- 'previous_WEEKDAY_APPR_PROCESS_START_FRIDAY_sum',
- 'previous_NAME_CLIENT_TYPE_Refreshed_sum',
- 'previous_NAME_TYPE_SUITE_Family_sum',
- 'previous_NAME_PRODUCT_TYPE_XNA_mean',
- 'previous_CODE_REJECT_REASON_XAP_mean',
- 'previous_DAYS_FIRST_DUE_min',
- 'previous_DAYS_FIRST_DUE_max',
- 'previous_DAYS_TERMINATION_max',
- 'previous_NFLAG_INSURED_ON_APPROVAL_max',
- 'previous_RATE_DOWN_PAYMENT_sum',
- 'previous_AMT_DOWN_PAYMENT_count',
- 'previous_CNT_PAYMENT_min',
- 'previous_CNT_PAYMENT_max',
- 'previous_HOUR_APPR_PROCESS_START_max',
- 'previous_HOUR_APPR_PROCESS_START_sum',
- 'previous_SELLERPLACE_AREA_sum',
- 'previous_AMT_DOWN_PAYMENT_sum',
- 'previous_AMT_APPLICATION_min',
- 'previous_AMT_GOODS_PRICE_min',
- 'previous_AMT_APPLICATION_sum',
- 'previous_DAYS_FIRST_DRAWING_mean',
- 'client_cash_SK_DPD_min_max',
- 'client_cash_NAME_CONTRACT_STATUS_Approved_mean_max',
- 'client_cash_NAME_CONTRACT_STATUS_Approved_sum_sum',
- 'client_cash_SK_DPD_DEF_sum_min',
- 'client_cash_SK_DPD_sum_min',
- 'client_cash_NAME_CONTRACT_STATUS_Returned to the store_mean_max',
- 'client_cash_NAME_CONTRACT_STATUS_Returned to the store_sum_sum',
- 'client_cash_NAME_CONTRACT_STATUS_Signed_mean_max',
- 'client_cash_NAME_CONTRACT_STATUS_Signed_sum_sum',
- 'client_cash_CNT_INSTALMENT_FUTURE_min_min',
- 'client_cash_NAME_CONTRACT_STATUS_Active_mean_min',
- 'client_cash_NAME_CONTRACT_STATUS_Active_mean_max',
- 'client_cash_NAME_CONTRACT_STATUS_Active_count_min',
- 'client_cash_CNT_INSTALMENT_max_min',
- 'client_cash_CNT_INSTALMENT_max_max',
- 'client_cash_NAME_CONTRACT_STATUS_Completed_sum_sum',
- 'client_cash_CNT_INSTALMENT_sum_min',
- 'client_cash_SK_DPD_DEF_sum_sum',
- 'client_cash_SK_DPD_sum_sum',
- 'client_cash_NAME_CONTRACT_STATUS_Active_count_sum',
- 'client_cash_CNT_INSTALMENT_sum_sum',
- 'client_credit_MONTHS_BALANCE_max_sum',
- 'client_credit_MONTHS_BALANCE_max_mean',
- 'client_credit_NAME_CONTRACT_STATUS_Sent proposal_mean_max',
- 'client_credit_AMT_DRAWINGS_POS_CURRENT_min_sum',
- 'client_credit_AMT_INST_MIN_REGULARITY_min_sum',
- 'client_credit_AMT_PAYMENT_TOTAL_CURRENT_min_mean',
- 'client_credit_AMT_DRAWINGS_ATM_CURRENT_min_sum',
- 'client_credit_AMT_DRAWINGS_CURRENT_min_sum',
- 'client_credit_AMT_PAYMENT_TOTAL_CURRENT_min_sum',
- 'client_credit_AMT_BALANCE_min_mean',
- 'client_credit_AMT_BALANCE_min_max',
- 'client_credit_AMT_BALANCE_min_sum',
- 'client_credit_AMT_PAYMENT_CURRENT_min_sum',
- 'client_credit_NAME_CONTRACT_STATUS_Signed_mean_max',
- 'client_credit_CNT_DRAWINGS_OTHER_CURRENT_max_sum',
- 'client_credit_CNT_DRAWINGS_OTHER_CURRENT_sum_sum',
- 'client_credit_AMT_DRAWINGS_OTHER_CURRENT_mean_sum',
- 'client_credit_AMT_DRAWINGS_OTHER_CURRENT_sum_sum',
- 'client_credit_AMT_DRAWINGS_POS_CURRENT_mean_sum',
- 'client_credit_AMT_DRAWINGS_POS_CURRENT_max_sum',
- 'client_credit_AMT_DRAWINGS_POS_CURRENT_sum_sum',
- 'client_credit_NAME_CONTRACT_STATUS_Completed_sum_sum',
- 'client_credit_SK_DPD_DEF_sum_min',
- 'client_credit_SK_DPD_DEF_sum_sum',
- 'client_credit_SK_DPD_max_sum',
- 'client_credit_SK_DPD_sum_sum',
- 'client_credit_CNT_DRAWINGS_CURRENT_mean_sum',
- 'client_credit_CNT_DRAWINGS_ATM_CURRENT_mean_sum',
- 'client_credit_CNT_DRAWINGS_CURRENT_max_sum',
- 'client_credit_CNT_DRAWINGS_CURRENT_sum_sum',
- 'client_credit_AMT_PAYMENT_TOTAL_CURRENT_mean_max',
- 'client_credit_AMT_BALANCE_mean_min',
- 'client_credit_AMT_BALANCE_mean_mean',
- 'client_credit_AMT_BALANCE_mean_max',
- 'client_credit_AMT_PAYMENT_TOTAL_CURRENT_max_min',
- 'client_credit_AMT_DRAWINGS_CURRENT_max_max',
- 'client_credit_AMT_DRAWINGS_ATM_CURRENT_mean_sum',
- 'client_credit_AMT_BALANCE_max_min',
- 'client_credit_AMT_BALANCE_max_max',
- 'client_credit_AMT_BALANCE_max_mean',
- 'client_credit_AMT_PAYMENT_CURRENT_mean_sum',
- 'client_credit_AMT_TOTAL_RECEIVABLE_mean_sum',
- 'client_credit_AMT_BALANCE_sum_max',
- 'client_credit_AMT_TOTAL_RECEIVABLE_max_sum',
- 'client_credit_NAME_CONTRACT_STATUS_Active_mean_max',
- 'client_credit_NAME_CONTRACT_STATUS_Active_mean_sum',
- 'client_credit_NAME_CONTRACT_STATUS_Active_count_min',
- 'client_credit_NAME_CONTRACT_STATUS_Approved_mean_count',
- 'client_credit_NAME_CONTRACT_STATUS_Active_sum_sum',
- 'client_credit_AMT_CREDIT_LIMIT_ACTUAL_max_max',
- 'client_credit_AMT_CREDIT_LIMIT_ACTUAL_min_sum',
- 'client_credit_AMT_CREDIT_LIMIT_ACTUAL_max_sum',
- 'client_credit_AMT_CREDIT_LIMIT_ACTUAL_sum_sum',
- 'client_installments_DAYS_INSTALMENT_sum_sum',
- 'client_installments_DAYS_INSTALMENT_mean_sum',
- 'client_installments_DAYS_INSTALMENT_max_sum',
- 'client_installments_DAYS_INSTALMENT_sum_mean',
- 'client_installments_DAYS_INSTALMENT_sum_max',
- 'client_installments_DAYS_INSTALMENT_min_min',
- 'client_installments_DAYS_INSTALMENT_max_min',
- 'client_installments_DAYS_INSTALMENT_min_mean',
- 'client_installments_DAYS_INSTALMENT_mean_mean',
- 'client_installments_DAYS_INSTALMENT_max_mean',
- 'client_installments_DAYS_INSTALMENT_min_max',
- 'client_installments_DAYS_INSTALMENT_mean_max',
- 'client_installments_DAYS_INSTALMENT_max_max',
- 'client_installments_NUM_INSTALMENT_VERSION_min_mean',
- 'client_installments_NUM_INSTALMENT_VERSION_max_min',
- 'client_installments_NUM_INSTALMENT_VERSION_max_mean',
- 'client_installments_NUM_INSTALMENT_NUMBER_min_max',
- 'client_installments_NUM_INSTALMENT_VERSION_max_max',
- 'client_installments_NUM_INSTALMENT_NUMBER_mean_max',
- 'client_installments_NUM_INSTALMENT_VERSION_count_min',
- 'client_installments_NUM_INSTALMENT_VERSION_sum_min',
- 'client_installments_NUM_INSTALMENT_VERSION_count_mean',
- 'client_installments_NUM_INSTALMENT_NUMBER_max_min',
- 'client_installments_NUM_INSTALMENT_NUMBER_max_max',
- 'client_installments_NUM_INSTALMENT_VERSION_count_max',
- 'client_installments_DAYS_ENTRY_PAYMENT_sum_count',
- 'client_installments_NUM_INSTALMENT_VERSION_min_sum',
- 'client_installments_NUM_INSTALMENT_NUMBER_sum_min',
- 'client_installments_NUM_INSTALMENT_NUMBER_min_sum',
- 'client_installments_NUM_INSTALMENT_VERSION_max_sum',
- 'client_installments_NUM_INSTALMENT_VERSION_count_sum',
- 'client_installments_NUM_INSTALMENT_NUMBER_max_sum',
- 'client_installments_NUM_INSTALMENT_VERSION_sum_sum',
- 'client_installments_NUM_INSTALMENT_NUMBER_sum_sum',
- 'client_installments_AMT_INSTALMENT_min_min',
- 'client_installments_AMT_INSTALMENT_min_mean',
- 'client_installments_AMT_INSTALMENT_min_max',
- 'client_installments_AMT_INSTALMENT_mean_min',
- 'client_installments_AMT_PAYMENT_max_min',
- 'client_installments_AMT_INSTALMENT_mean_mean',
- 'client_installments_AMT_INSTALMENT_mean_max',
- 'client_installments_AMT_PAYMENT_max_mean',
- 'client_installments_AMT_INSTALMENT_sum_min',
- 'client_installments_AMT_PAYMENT_max_max',
- 'client_installments_AMT_INSTALMENT_sum_mean',
- 'client_installments_AMT_PAYMENT_min_sum',
- 'client_installments_AMT_INSTALMENT_min_sum',
- 'client_installments_AMT_INSTALMENT_sum_max',
- 'client_installments_AMT_INSTALMENT_mean_sum',
- 'client_installments_AMT_PAYMENT_max_sum',
- 'client_installments_AMT_INSTALMENT_sum_sum']
-
-# Créez un formulaire pour saisir les 387 caractéristiques
+# charge les données et du model
+data, data_id = DataClients.LoadData()
+'''
+# Convertir les colonnes booléennes en entiers
+for col in data.select_dtypes(include=['bool']).columns:
+    data[col] = data[col].astype(int)
+'''    
+st.text(type(data))
+'''
+# Créez un formulaire pour saisir les caractéristiques
 with st.form(key='client_form'):
-    features = []
-    for caracteristique in caracteristiques:
-        feature = st.number_input(f'{caracteristique}', value=0.0)
-        features.append(feature)
+
+    # affichage des données
+    st.dataframe(data)
+    
+    # sélection d'un client à prédire
+    ligne = st.number_input('Sélectionner un numéro de ligne client', value=0)
+    client_info = data.iloc[ligne, :]
+    st.text(f'Vous avez choisi le client n° {data_id[ligne]} :')
+    st.dataframe(client_info)
+
     submit_button = st.form_submit_button(label='Prédire')
+''' 
+#client_info = st.selectbox('Sélectionner une colonne pour l\'histogramme', data.columns)
+
+        
+# Créez un formulaire pour saisir les 387 caractéristiques
+st.dataframe(data)
+
+json_data = data.to_json(orient='records')
+response = requests.post("http://127.0.0.1:8000/shap", json={"data": json.loads(json_data)})
+st.write(f"status_code : {response.status_code}")
+st.write(response)
+img_data = response.image  
+
+# Afficher l'image dans Streamlit
+#img = Image.open(io.BytesIO(img_data))
+st.image(io.BytesIO(img_data), caption='Graphique SHAP', use_column_width=True)
+
+with st.form(key='client_selection'):
+    # sélection d'un client à prédire
+    ligne = st.number_input('Sélectionner un numéro de ligne client', value=0)
+    client_info = data.iloc[ligne, :]
+    select_button = st.form_submit_button(label='Sélectionner')
+
+if select_button:
+    st.text(f'Vous avez choisi le client n° {data_id[ligne]} :')
+    st.dataframe(client_info)
+    
+with st.form(key='client_submission'):
+    features = []
+    for val in client_info.values:
+        features.append(val)
+    submit_button = st.form_submit_button(label='Prédire')
+
+# Assurer que tous les types NumPy sont convertis en types natifs Python
+def convert_to_native_type(value):
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float):
+        if np.isnan(value) or np.isinf(value):
+            return 0
+    return value
 
 # Lorsque le formulaire est soumis
 if submit_button:
-    client_data = {"features": features}
-    response = requests.post("http://127.0.0.1:8000/predict", json=client_data)
+    features = [convert_to_native_type(item) for item in features]
+    #features = [float(x) if isinstance(x, bool) and x in (True, False) else x for x in features]
+    #features = [float(x)*0 for x in features]
+    #features = [0 if x is None else x for x in features]
+    st.write(features)
+    #features_natif = [int(item) if isinstance(item, np.int64) else item for item in features_natif]
+    #st.write(f"features_natif : {features_natif}")
+    
+    client_features = {'features': {str(key): value for key, value in zip(client_info.index, features)}} #{"features": features}
+    st.dataframe(pd.DataFrame(client_features))
+    #st.write(f"client_data : {client_data}")
+    response = requests.post("http://127.0.0.1:8000/predict", json=client_features)
+    st.write(f"status_code : {response.status_code}")
     
     if response.status_code == 200:
         prediction = response.json()
         st.write(f"Prédiction: {'Accepté' if prediction['prediction'] == 0 else 'Refusé'}")
         st.write(f"Probabilité de défaut: {prediction['probability']:.2f}")
+        st.plotly_chart(PlotScore.jauge_bar(prediction['probability']))
     else:
         st.write("Erreur lors de la prédiction.")
+        st.write(response.json())
+    

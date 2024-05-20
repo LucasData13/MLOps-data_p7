@@ -7,11 +7,17 @@ Created on Wed May 15 15:59:02 2024
 # 1. Library imports
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import pandas as pd
 import mlflow
 import mlflow.lightgbm
 import os
+from typing import Dict, List
+import shap
+import io
+import base64
+import matplotlib.pyplot as plt
 
 # Configurer les variables d'environnement pour AWS S3
 '''
@@ -23,7 +29,12 @@ os.environ['AWS_SECRET_ACCESS_KEY'] = '<your-secret-key>'
 app = FastAPI()
 
 class ClientData(BaseModel):
-    features: list[float]
+    features: Dict[str, float] # dict[float]
+    #Dict[str, float]
+    #index: int  # Ajoutez cette ligne pour inclure un index
+
+class TotalData(BaseModel):
+    data: List[Dict]
 
 def load_model():
     '''
@@ -36,16 +47,42 @@ def load_model():
 
 model = load_model()
 
+@app.post("/shap")
+async def ShapGlobal(item: TotalData):
+    data = pd.DataFrame(item.data)
+    # Compute SHAP values
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(data)
+    #shap.waterfall_plot(shap_values[0])
+    plt.figure(figsize=(10, 8))
+    shap.summary_plot(shap_values, data, plot_size=[15, 9], plot_type="dot", show=False)
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    #plt.close(fig)
+    
+    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    return JSONResponse(content={"image": img_base64})
+    '''
+    img_binary = buf.getvalue()
+    
+    return {"image": img_binary}
+    '''
+
 @app.post("/predict")
-async def predict(client_data: ClientData):
+async def predict(client_data: ClientData):  #: ClientData
     try:
-        input_data = pd.DataFrame([client_data.features])
+        input_data = pd.DataFrame(data= client_data.features, index=[0]) # [client_data.features]   client_data.features
+        
         probability = model.predict_proba(input_data)[0][1]
         prediction = int(probability > 0.411)
+        
         return {"prediction": prediction, "probability": probability}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
         
+
 # 4. Run the API with uvicorn
 #    Will run on http://127.0.0.1:8000
 if __name__ == '__main__':
