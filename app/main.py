@@ -18,7 +18,10 @@ import shap
 import io
 import base64
 import matplotlib.pyplot as plt
+import pickle
+import requests 
 
+        
 # Configurer les variables d'environnement pour AWS S3
 '''
 os.environ['MLFLOW_S3_ENDPOINT_URL'] = 'https://s3.amazonaws.com'
@@ -41,9 +44,19 @@ def load_model():
     model_uri = "s3://<your-bucket-name>/<path-to-model>"
     model = mlflow.sklearn.load_model(model_uri)
     '''
+    '''
     model_uri = 'file:///C:/Users/Utilisateur/formation_datascientist/projet_7_implementez_un_mod%C3%A8le_de_scoring/scripts/mlruns/683398248208863224/9dc1d1f54a9740688e427862f49c7e6d/artifacts/model'
     #model_uri = "models:/best_model_11_05_2@champion" 
     model = mlflow.lightgbm.load_model(model_uri)
+    '''
+    model_url = 'https://github.com/LucasData13/projet7/raw/main/modelisation/model/model.pkl'
+    response = requests.get(model_url)
+
+    with open('modele.pkl', 'wb') as f:
+            f.write(response.content)
+    with open('modele.pkl', 'rb') as f:
+            model = pickle.load(f)
+    
     return model
 
 model = load_model()

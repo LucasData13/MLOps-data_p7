@@ -48,7 +48,8 @@ class PlotScore:
 class DataClients:
     
     def LoadData():
-        path_data = "C:\\Users\\Utilisateur\\formation_datascientist\\projet_7_implementez_un_modèle_de_scoring\\scripts\\tests\\"
+        path_data = 'https://raw.githubusercontent.com/LucasData13/projet7/main/tests/api_data.csv'
+        #path_data = "C:\\Users\\Utilisateur\\formation_datascientist\\projet_7_implementez_un_modèle_de_scoring\\scripts\\tests\\"
         api_data = pd.read_csv(path_data + 'api_data.csv')
         
         X = api_data.drop(['SK_ID_CURR', 'TARGET', 'Unnamed: 0'], axis=1)
