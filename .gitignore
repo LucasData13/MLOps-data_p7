@@ -1,0 +1,47 @@
+# Ignorer les fichiers binaires
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Ignorer les fichiers de logs
+*.log
+logs/
+
+# Ignorer les fichiers de configuration
+*.env
+config/settings.py
+
+# Ignorer les fichiers compilés Python
+*.pyc
+__pycache__/
+
+# Ignorer les répertoires de l'environnement virtuel Python
+env_p7/
+api_venv/
+
+# Ignorer les run MLflow
+mlruns/
+
+# init de package
+__init__.py
+
+# Ignorer les fichiers de sauvegarde créés par des éditeurs
+*~
+*.swp
+*.swo
+.DS_Store
+
+# Ignorer les fichiers de l'intégration continue
+.coverage
+*.coverage
+coverage/
+
+# Ignorer les fichiers de paquets pour des langages spécifiques
+*.jar
+*.war
+*.zip
+*.tar.gz
+
+# Ne pas ignorer ce fichier README spécifique
+!docs/README.md
