@@ -1,4 +1,4 @@
-env_p7
-api_venv
-mlruns
-__pycache__
+env_p7/
+api_venv/
+mlruns/
+__pycache__/
