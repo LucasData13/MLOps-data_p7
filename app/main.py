@@ -49,6 +49,7 @@ def load_model():
     #model_uri = "models:/best_model_11_05_2@champion" 
     model = mlflow.lightgbm.load_model(model_uri)
     '''
+    '''
     model_url = 'https://github.com/LucasData13/projet7/raw/main/modelisation/model/model.pkl'
     response = requests.get(model_url)
 
@@ -56,6 +57,8 @@ def load_model():
             f.write(response.content)
     with open('modele.pkl', 'rb') as f:
             model = pickle.load(f)
+    '''
+    model = pickle.load(open('modelisation/model/model.pkl', 'rb'))
     
     return model
 
