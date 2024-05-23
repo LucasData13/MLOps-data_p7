@@ -5,22 +5,16 @@ Created on Wed May 15 15:59:02 2024
 @author: Utilisateur
 """
 # 1. Library imports
-import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import pandas as pd
-import mlflow
-import mlflow.lightgbm
-import os
 from typing import Dict, List
 import shap
 import io
 import base64
 import matplotlib.pyplot as plt
 import pickle
-import requests 
-
         
 # Configurer les variables d'environnement pour AWS S3
 '''
@@ -99,8 +93,9 @@ async def predict(client_data: ClientData):  #: ClientData
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
         
-
+'''
 # 4. Run the API with uvicorn
 #    Will run on http://127.0.0.1:8000
 if __name__ == '__main__':
     uvicorn.run(app, host='127.0.0.1', port=8000)
+'''

@@ -14,7 +14,9 @@ config/settings.py
 
 # Ignorer les fichiers compilés Python
 *.pyc
-__pycache__/
+__pycache__
+stream_mod/__pycache__/stream_module.cpython-311.pyc
+stream_module.cpython-311.pyc
 
 # Ignorer les répertoires de l'environnement virtuel Python
 env_p7/

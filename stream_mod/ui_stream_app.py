@@ -7,13 +7,8 @@ Created on Thu May 16 23:30:24 2024
 
 import streamlit as st
 import requests
-import pandas as pd
-import plotly.graph_objects as go
-from stream_mod.stream_module import PlotScore, DataClients
+from stream_module import PlotScore, DataClients
 import numpy as np
-import json
-from PIL import Image
-import io
 
 st.title("Prédiction de Défaut de Crédit")
 
@@ -49,7 +44,9 @@ if submit_button:
     features = [convert_to_native_type(item) for item in features]
     
     client_features = {'features': {str(key): value for key, value in zip(client_info.index, features)}} #{"features": features}
-    response = requests.post("http://127.0.0.1:8000/predict", json=client_features)
+    
+    url = 'https://apigamba-6f486e3c76df.herokuapp.com/predict'
+    response = requests.post(url, json=client_features)
     
     if response.status_code == 200:
         prediction = response.json()

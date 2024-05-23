@@ -11,7 +11,8 @@ import requests
 #from app.main import app, ClientData
 from stream_mod.stream_module import DataClients
 
-BASE_URL = "http://localhost:8000/predict"
+#BASE_URL = "http://localhost:8000/predict"
+BASE_URL = 'https://apigamba-6f486e3c76df.herokuapp.com/predict'
 
 #client = TestClient(app)
 
