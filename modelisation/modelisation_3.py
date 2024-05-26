@@ -7,52 +7,42 @@ Original file is located at
     https://colab.research.google.com/drive/1W1PeIcLcLn7y-zynyhFpcljoS5EHu3-x
 """
 
-# pandas and numpy for data manipulation
+# INITIALISATION DU SCRIPT---------------------------------------------
+#----------------------------------------------------------------------
+
+# Modules import
 import os
-import cloudpickle
 import mlflow.lightgbm
 import mlflow.xgboost
 import mlflow.sklearn
 import mlflow
-from mlflow.models import make_metric, infer_signature
+from mlflow.models import infer_signature
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.model_selection import learning_curve, cross_validate
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import f1_score, precision_score, confusion_matrix, classification_report, recall_score, roc_auc_score, accuracy_score
 from sklearn.metrics import make_scorer
 from lightgbm import LGBMClassifier
 from xgboost import XGBClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.impute import SimpleImputer, KNNImputer
+from sklearn.impute import SimpleImputer #, KNNImputer
 from imblearn.pipeline import Pipeline as imbpipeline
 from imblearn.over_sampling import SMOTE
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
-import gc
 import warnings
 import seaborn as sns
 import pandas as pd
 import numpy as np
-
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.impute import KNNImputer
 from sklearn.preprocessing import FunctionTransformer
 from sklearn.preprocessing import RobustScaler
-
-from sklearn.base import TransformerMixin
-
-from sklearn.experimental import enable_iterative_imputer 
 from sklearn.impute import IterativeImputer
 from sklearn.linear_model import BayesianRidge
-
 from scipy.stats import randint, uniform
-import plotly
-import plotly.graph_objects as go
-
 from time import time
+import shap
 
 # matplotlib and seaborn for plotting
 import matplotlib.pyplot as plt
@@ -61,20 +51,17 @@ plt.rcParams['font.size'] = 22
 # Suppress warnings from pandas
 warnings.filterwarnings('ignore')
 
-import shap
 
-# Memory management
-
-
-# import des données traitées
+# import des données traitées-----------------------------------
 path_data = "C:\\Users\\Utilisateur\\formation_datascientist\\projet_7_implementez_un_modèle_de_scoring\\"
 train_complete = pd.read_csv(path_data + 'train_complete.csv')
 train_complete = train_complete.drop('SK_ID_CURR', axis=1)
 
+# séparation de la target
 X_train_initial = train_complete.drop('TARGET', axis=1)
 y_train_initial = train_complete.TARGET
 
-
+# fonction d'échantillonnage des données
 def train_test_spliter(X, y, sampling=0.3):
     # extraction d'un échantillon de sampling % de l'ensemble
     X_train_step_1, X_extracted, y_train_step_1, y_extracted = train_test_split(
@@ -88,29 +75,40 @@ def train_test_spliter(X, y, sampling=0.3):
     return X_train, y_train, X_valid, y_valid, X_test, y_test
 
 
+# 1) EQUILIBRAGE DES DONNEES PAR SMOTE------------------------------------------------------------
+#-------------------------------------------------------------------------------------------------
+
+# création de trois instances d'imputation de données manquantes
 imputer = IterativeImputer(estimator=BayesianRidge(), initial_strategy='median', random_state=0)
 imputer_median = SimpleImputer(strategy='median')
 imputer_mean = SimpleImputer(strategy='mean')
+
+# instance SMOTE
 smote = SMOTE(random_state=0)
+
+# instances de mise à l'échelle
 scaler = RobustScaler()
 std_scaler = StandardScaler()
 
-# Sélection des colonnes de type int
-# et Récupération des indices des colonnes de type int
-discrete_features_names = X_train_initial.select_dtypes(include=['int', 'bool']).columns
-discrete_features_indices = [X_train_initial.columns.get_loc(col) for col in discrete_features_names]
-
-
-
+# Création d'un pipeline d'équilibrage des classes:
+# -> comme smote fonction avec un algorythm KNN il faut combler les données manquantes et mettre 
+#    à l'échelle pour les calculs de distances
 preprocessing_over = imbpipeline([
     ('scaler', std_scaler),
     ('imputer', imputer_mean),
     ('smote', smote)
     ])
 
-# Définition de la fonction re_discretize
+# Définition de la fonction re_discretize:
+# -> Les variables discrètes sont transformées en variables continues à cause de l'interpolation dans le SMOTE.
+#    la fonction suivant rediscrétise ces variables.
 def re_discretize(array):
     return np.round(array).astype(int)
+
+# Sélection des colonnes de type int pour la rediscrétisation
+# et Récupération des indices des colonnes de type int
+discrete_features_names = X_train_initial.select_dtypes(include=['int', 'bool']).columns
+discrete_features_indices = [X_train_initial.columns.get_loc(col) for col in discrete_features_names]
 
 # Redicrétisation des variables discrètes avec la fonction re_discretize
 discrete_preprocessor = Pipeline([('rediscretizer', FunctionTransformer(lambda x: re_discretize(x)))])
@@ -138,7 +136,14 @@ X_train_preprocess_1 = pd.DataFrame(preprocessing_rediscret.fit_transform(X_trai
                                     columns=X_train.columns)
 
 '''
-#_________________________________________________________________
+
+# 2) STRATEGIE D'EVALUATION ------------------------------------------------
+#   Pour chaque estimateur, 4 configuration sont testées :
+#    1 - classes non équilibrées
+#    2 - classes équilibrées par les hyperparamètres de l'estimateur
+#    3 - classes équilibrées en amont sur les données par SMOTE avant l'entraînement
+#    4 - classes équilibrées au sein de la pipeline par SMOTE
+#---------------------------------------------------------------------------
 
 
 # pour des questions de temps de calculs je fais de l'imputation par la moyenne plutôt que knn ou baysianridge
@@ -165,6 +170,17 @@ model_lgb_3 = Pipeline([('classifier', LGBMClassifier(random_state=0))])
 model_lgb_4 = imbpipeline([('imputer', imputer_mean), ('smote', smote), ('classifier', LGBMClassifier(random_state=0))])
 
 
+# 3) CREATION DES FONCTIONS NECESSAIRES AU PROJET----------------------------
+#----------------------------------------------------------------------------
+
+# dans cette partie sont crées une première version de fonctions :
+#   - de scoring des modèles
+#   - d'évaluation globales des modèles avec d'autres metrics
+#   - de tracking d'expériences dans MLflow.
+
+
+# Le score tenant compte du déséquilibre des classes
+'''
 def score_metier(y_true, ypred):
     conf_matrix = confusion_matrix(y_true, ypred)
     conf_rav = conf_matrix.ravel()
@@ -172,6 +188,7 @@ def score_metier(y_true, ypred):
     return (10 * FN + FP)/len(ypred)
 
 scorer_metier = make_scorer(score_metier, greater_is_better=False)
+'''
 
 def score_metier_2(y_true, ypred):
     FN = np.sum((y_true == 1) & (ypred == 0))
@@ -180,7 +197,7 @@ def score_metier_2(y_true, ypred):
 
 scorer_metier_2 = make_scorer(score_metier_2, greater_is_better=False)
 
-
+# fonction de calcul des métrics pour comparer les modèles entre eux
 def ComputeAndPrintPerformance(y_valid_hat, y_valid, y_train_hat, y_train, thd=0.5, print_scores=False):
 
     # classification cible selon seuil
@@ -250,6 +267,8 @@ def ComputeAndPrintPerformance(y_valid_hat, y_valid, y_train_hat, y_train, thd=0
 
     return metrics_grid_numeric, metrics_grid_tab
 
+
+# ci-dessous groupe de 3 fonctions de tracking d'expérience---------------------------
 
 def delete_file(file_path):
     # Vérifier si le fichier existe avant de le supprimer
@@ -349,51 +368,6 @@ def saving_mlflow(experience_name, run_name, model, signature, model_library,
         mlflow.end_run()
 
 
-
-def evaluation(model, training_set, testing_set, thd=0.5, print_scores=True):
-    """
-
-      Parameters
-      ----------
-      model : TYPE -> estimator
-          DESCRIPTION -> estimateur à évaluer
-      training_set : TYPE -> liste à deux éléments
-          DESCRIPTION -> contient les données d'entraînement et la cible (ex: [X_train, y_train])
-      testing_set : TYPE -> liste à deux éléments
-          DESCRIPTION -> contient les données d'évaluation à prédire et la cible (ex: [X_test, y_test])
-      thd : TYPE -> float, optional
-          DESCRIPTION -> seuil de classification de l'estimateur à évaluer, The default is 0.5.
-      print : TYPE -> bool, optional
-          DESCRIPTION -> affiche les metrics calculés si True, The default is True.
-
-      Returns
-      -------
-      None.
-
-      """
-   
-    model.fit(training_set[0], training_set[1])
-    
-    y_valid_hat = model.predict_proba(testing_set[0])
-    y_train_hat = model.predict_proba(training_set[0])
-    
-    metrics_grid_numeric, metrics_grid_tab = ComputeAndPrintPerformance(y_valid_hat,
-                                                                        testing_set[1], y_train_hat,
-                                                                        training_set[1], thd=thd,
-                                                                        print_scores=print_scores)
-
-    return model, metrics_grid_numeric, metrics_grid_tab
-
-
-"""
-X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_initial,
-                                                                        y_train_initial,
-                                                                        sampling=0.01)
-
-print(X_train.shape)
-print(X_valid.shape)
-"""
-
 def mlflow_generation(experience_name, phase_name, 
                       dict_of_models, sampling_rate, 
                       threshold=0.5,
@@ -459,7 +433,44 @@ def mlflow_generation(experience_name, phase_name,
                      tag_grid=tag_grid)
 
 
-# brouillon fonction mlfow 2.0 avec mlflow.evaluate_____________________
+# Evaluation tenant compte du seuil de classification------------------------------------
+def evaluation(model, training_set, testing_set, thd=0.5, print_scores=True):
+    """
+
+      Parameters
+      ----------
+      model : TYPE -> estimator
+          DESCRIPTION -> estimateur à évaluer
+      training_set : TYPE -> liste à deux éléments
+          DESCRIPTION -> contient les données d'entraînement et la cible (ex: [X_train, y_train])
+      testing_set : TYPE -> liste à deux éléments
+          DESCRIPTION -> contient les données d'évaluation à prédire et la cible (ex: [X_test, y_test])
+      thd : TYPE -> float, optional
+          DESCRIPTION -> seuil de classification de l'estimateur à évaluer, The default is 0.5.
+      print : TYPE -> bool, optional
+          DESCRIPTION -> affiche les metrics calculés si True, The default is True.
+
+      Returns
+      -------
+      None.
+
+      """
+   
+    model.fit(training_set[0], training_set[1])
+    
+    y_valid_hat = model.predict_proba(testing_set[0])
+    y_train_hat = model.predict_proba(training_set[0])
+    
+    metrics_grid_numeric, metrics_grid_tab = ComputeAndPrintPerformance(y_valid_hat,
+                                                                        testing_set[1], y_train_hat,
+                                                                        training_set[1], thd=thd,
+                                                                        print_scores=print_scores)
+
+    return model, metrics_grid_numeric, metrics_grid_tab
+
+
+
+# brouillon fonction mlfow 2.0 avec mlflow.evaluate-------------------------------------------------
 
 '''
 def custom_artifact(eval_df, builtin_metrics, artifacts_dir):
@@ -539,7 +550,7 @@ def running_mlflow(model, eval_data, exp_name, run_name, signature, model_librar
        return result
    
    
-
+# fonction d'evaluation incluant mlflow.evaluate-------------------------
 def EvalModel(model, X_training, y_training, X_eval, y_eval, exp_name, run_name, model_library, tag_grid):
     """
     Parameters
@@ -578,6 +589,13 @@ def EvalModel(model, X_training, y_training, X_eval, y_eval, exp_name, run_name,
     return result
 
 
+# 4) EVALUATION DES MODELES-------------------------------------------------------------
+#---------------------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------------------
+# 4-1) Construction des dictionnaires de pipelines de tests-------------------------------
+#-----------------------------------------------------------------------------------------
+
 dict_of_models_unbalanced = {
     'model_logistic_brute': [model_logistic_1, 'skl', {'balanced': 'no'}],
     'model_rdmfst_brute': [model_rdmfst_1, 'skl', {'balanced': 'no'}],
@@ -611,7 +629,13 @@ X_train, y_train, X_valid, y_valid, X_test, y_test = train_test_spliter(X_train_
                                                                         y_train_initial,
                                                                         sampling=sampling_rate)
 
-# experience sur données non équilibrées
+#------------------------------------------------------------------------------------
+# 4-2) Test de chaque dictionnaire sans optimisation de paramètres-------------------
+#   -> permet de filtrer d'embler les approches médiocres
+#    - pour se econcentrer après sur l'optimisation des plus pertinentes
+#------------------------------------------------------------------------------------
+
+# experience sur données non équilibrées---------------------------------------------
 exp_name = 'unbalanced data'
 
 dict_of_models_unbalanced = {
@@ -627,7 +651,7 @@ for model_name, elt in dict_of_models_unbalanced.items():
     run_name = exp_name + ' ' + model_name
     EvalModel(model, X_train, y_train, X_valid, y_valid, exp_name, run_name, model_library, tag_grid)
 
-# experience sur données équilibrées par un hyperparamètre estimateur
+# experience sur données équilibrées par un hyperparamètre estimateur----------------
 exp_name = 'hyperparam balanced data'
 
 for model_name, elt in dict_of_models_param_balanced.items():
@@ -638,7 +662,7 @@ for model_name, elt in dict_of_models_param_balanced.items():
     run_name = exp_name + ' ' + model_name
     EvalModel(model, X_train, y_train, X_valid, y_valid, exp_name, run_name, model_library, tag_grid)
 
-# experience sur données équilibrées par SMOTE
+# experience sur données équilibrées par SMOTE---------------------------------------
 exp_name = 'smote balanced data'
 X_train_smote, y_train_smote = BalanceData(X_train, y_train)
 
@@ -661,10 +685,14 @@ for model_name, elt in dict_of_models_smote_pipe_balanced.items():
     run_name = exp_name + ' ' + model_name
     EvalModel(model, X_train_smote, y_train_smote, X_valid, y_valid, exp_name, run_name, model_library, tag_grid)
 
+#---------------------------------------------------------------------------------------------
+# 4-3) Optimisation des hyperparams balanced--------------------------------------------------
+#---------------------------------------------------------------------------------------------
 
-# Optimisation des hyperparams balanced____________________________________________________________________
+# La meilleure approche, et de loin, et l'équilibrage pour hyperparamètre (approche 2)
+# c'est sur celle-ci que je me concentre pour l'optimisation des hyperparamètres
 
-
+# dictionnaire d'approche 2:
 dict_of_models_param_balanced = {
     'model_logistic_balanced_param': [model_logistic_2, 'skl', {'balanced': 'yes:param'}],
     'model_rdmfst_balanced_param': [model_rdmfst_2, 'skl', {'balanced': 'yes:param'}],
@@ -672,6 +700,7 @@ dict_of_models_param_balanced = {
     'model_lgb_balanced_param': [model_lgb_2, 'lgb', {'balanced': 'yes:param'}]
 }
 
+# fonction de tracking adapté à cette phase
 def log_in_mlflow(exp_name, dict_info, model_best):
     for model_name, elt in dict_info.items():
         print(model_name)
@@ -682,6 +711,7 @@ def log_in_mlflow(exp_name, dict_info, model_best):
         result = EvalModel(model, X_train, y_train, X_valid, y_valid, exp_name, run_name, model_library, tag_grid)
     return result
 
+# 2 fonctions d'optimisation par cross-validation
 def GridSearchRun(exp_name, dict_info, params):
     model_pipe = list(dict_info.values())[0][0]
     search = GridSearchCV(model_pipe, params, scoring=scorer_metier_2, cv=4, verbose=1)
@@ -691,8 +721,7 @@ def GridSearchRun(exp_name, dict_info, params):
     
     result = log_in_mlflow(exp_name, dict_info, model_best)
     print(result.metrics)
-    
-    
+     
 def RandomSearchRun(exp_name, dict_info, params, random_state, n_iter):
     model_pipe = list(dict_info.values())[0][0]
     random_search = RandomizedSearchCV(model_pipe, param_distributions=params,  
@@ -706,8 +735,11 @@ def RandomSearchRun(exp_name, dict_info, params, random_state, n_iter):
     print(result.metrics)
     return param_best
     
-    
-# LogisticRegression
+# NOTA : étant donné le volume de données et d'hyperparamètres, la bonne approche est de balayer une 
+# large zone d'hyperparamètres par un RandomSearchCV avec beaucoup de run pour ensuite se concentrer
+# sur les zone les plus performantes identifiées grâce à MLflow UI.
+
+# LogisticRegression--------------------------------------------------------------
 
 dict_info = {'model_logistic_balanced_param': [model_logistic_2, 'skl', {'balanced': 'yes:param',
                                                                          'optimisation': 'yes:param'}]}
@@ -722,7 +754,7 @@ param_search = RandomSearchRun(exp_name, dict_info, params_reg, random_state = 9
 print(param_search)
 
 
-# xgb
+# xgb-----------------------------------------------------------------------------
 
 dict_info = {'model_xgb_balanced_param': [model_xgb_2, 'xgb', {'balanced': 'yes:param',
                                                                          'optimisation': 'yes:param'}]}
@@ -743,7 +775,7 @@ param_search = RandomSearchRun(exp_name, dict_info, param_xgb, random_state = 39
 print(param_search)
 
 
-# lgb
+# lgb-----------------------------------------------------------------------------
 
 dict_info = {'model_lgb_balanced_param': [model_lgb_2, 'lgb', {'balanced': 'yes:param',
                                                                          'optimisation': 'yes:param'}]}
@@ -758,6 +790,14 @@ param_lgb = {
     'classifier__reg_alpha': uniform(0, 5),  # Terme de régularisation L1 sur les poids
     'classifier__reg_lambda': uniform(0, 5)  # Terme de régularisation L2 sur les poids
 }
+
+
+#---------------------------------------------------------------------------------------------
+# 4-4) Optimisation du meilleur modèle--------------------------------------------------------
+#---------------------------------------------------------------------------------------------
+
+# NOTA: le LGB donne les meilleurs résultats.
+# Le script suivant test plusieurs configurations pour traquer la meilleure performance possible.
 
 param_lgb_2 = {
     'classifier__n_estimators': randint(260, 280),  # Nombre d'arbres à construire
@@ -845,11 +885,12 @@ print(result.metrics)
  'classifier__reg_lambda': 3.199605106637619, 
  'classifier__subsample': 0.5716766437045232}
 
-#_______________________________________________________________________
 
-# Optimisation du seuil de classification_______________________________
+#---------------------------------------------------------------------------------------------
+# 4-5) Optimisation du seuil de classification------------------------------------------------
+#---------------------------------------------------------------------------------------------
 
-
+# fonction de tracking adaptée à cette phase
 def Evaluate_Threshold(y_valid_hat, y_valid, y_train_hat, y_train, model, thd,
                                    model_name, model_library, experience_name, phase_name):
     """
@@ -898,6 +939,7 @@ def ThresholdSearch(model, model_name):
                            model_name=model_name, model_library='lgb', 
                            experience_name="optimisation_threshold_restreint", phase_name='threshold restreint')
 
+# optimisation du seuil sur deux configurations d'hypermaramètres LGB ayant des performances proches
 # best_lgb_11_05 - Version 1 
 logged_model = 'runs:/520dd30d379142be866f7d46e277b178/model'
 best_lgb_11_05 = mlflow.lightgbm.load_model(logged_model)
@@ -916,6 +958,11 @@ best_lgb_11_05_2 :
 runs:/9dc1d1f54a9740688e427862f49c7e6d/model : meilleur modèle sur la validation avec un seuil de classification de 0.411
 
 '''
+
+#---------------------------------------------------------------------------------------------
+# 4-6) Evaluation finale sur un set de test jamais lu par le modèle---------------------------
+#---------------------------------------------------------------------------------------------
+
 # evaluation sur le set de test avec le meilleur modèle
 y_valid_hat = best_lgb_11_05_2.predict_proba(X_valid)
 y_test_hat = best_lgb_11_05_2.predict_proba(X_test)

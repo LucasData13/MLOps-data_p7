@@ -6,16 +6,20 @@ Created on Wed May 15 15:59:02 2024
 """
 # 1. Library imports
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import pandas as pd
 from typing import Dict, List
-import shap
+import pickle
+   
+# pour projet 8:
+'''
 import io
 import base64
 import matplotlib.pyplot as plt
-import pickle
-        
+from fastapi.responses import JSONResponse
+import shap
+'''
+     
 # Configurer les variables d'environnement pour AWS S3
 '''
 os.environ['MLFLOW_S3_ENDPOINT_URL'] = 'https://s3.amazonaws.com'
@@ -58,12 +62,14 @@ def load_model():
 
 model = load_model()
 
-@app.post("/shap")
+# pour projet 8:
+@app.post("/shap_global")
 async def ShapGlobal(item: TotalData):
-    data = pd.DataFrame(item.data)
+    #data = pd.DataFrame(item.data)
     # Compute SHAP values
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(data)
+    #explainer = shap.TreeExplainer(model)
+    #shap_values = explainer.shap_values(data)
+    '''
     #shap.waterfall_plot(shap_values[0])
     plt.figure(figsize=(10, 8))
     shap.summary_plot(shap_values, data, plot_size=[15, 9], plot_type="dot", show=False)
@@ -74,8 +80,9 @@ async def ShapGlobal(item: TotalData):
     #plt.close(fig)
     
     img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    
     return JSONResponse(content={"image": img_base64})
-    '''
+    
     img_binary = buf.getvalue()
     
     return {"image": img_binary}
