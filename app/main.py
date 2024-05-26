@@ -19,13 +19,6 @@ import matplotlib.pyplot as plt
 from fastapi.responses import JSONResponse
 import shap
 '''
-     
-# Configurer les variables d'environnement pour AWS S3
-'''
-os.environ['MLFLOW_S3_ENDPOINT_URL'] = 'https://s3.amazonaws.com'
-os.environ['AWS_ACCESS_KEY_ID'] = '<your-access-key>'
-os.environ['AWS_SECRET_ACCESS_KEY'] = '<your-secret-key>'
-'''
 
 app = FastAPI()
 
