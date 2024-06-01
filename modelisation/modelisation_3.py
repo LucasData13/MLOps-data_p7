@@ -43,6 +43,7 @@ from sklearn.linear_model import BayesianRidge
 from scipy.stats import randint, uniform
 from time import time
 import shap
+from sklearn.metrics import roc_curve, auc
 
 # matplotlib and seaborn for plotting
 import matplotlib.pyplot as plt
@@ -781,14 +782,14 @@ dict_info = {'model_lgb_balanced_param': [model_lgb_2, 'lgb', {'balanced': 'yes:
                                                                          'optimisation': 'yes:param'}]}
 
 param_lgb = {
-    'classifier__n_estimators': randint(100, 1000),  # Nombre d'arbres à construire
-    'classifier__max_depth': randint(3, 10),  # Profondeur maximale de l'arbre
-    'classifier__learning_rate': uniform(0.01, 0.3),  # Taux d'apprentissage
-    'classifier__subsample': uniform(0.5, 0.5),  # Sous-échantillonnage des observations lors de la construction de chaque arbre
-    'classifier__colsample_bytree': uniform(0.5, 0.5),  # Sous-échantillonnage des colonnes lors de la construction de chaque arbre
-    'classifier__min_child_samples': randint(5, 50),  # Nombre minimal d'échantillons requis pour chaque feuille
-    'classifier__reg_alpha': uniform(0, 5),  # Terme de régularisation L1 sur les poids
-    'classifier__reg_lambda': uniform(0, 5)  # Terme de régularisation L2 sur les poids
+    'classifier__n_estimators':      randint(100, 1000),  # Nombre d'arbres à construire
+    'classifier__max_depth':         randint(3, 10),      # Profondeur maximale de l'arbre
+    'classifier__learning_rate':     uniform(0.01, 0.3),  # Taux d'apprentissage
+    'classifier__subsample':         uniform(0.5, 0.5),   # Sous-échantillonnage des observations lors de la construction de chaque arbre
+    'classifier__colsample_bytree':  uniform(0.5, 0.5),   # Sous-échantillonnage des colonnes lors de la construction de chaque arbre
+    'classifier__min_child_samples': randint(5, 50),      # Nombre minimal d'échantillons requis pour chaque feuille
+    'classifier__reg_alpha':         uniform(0, 5),       # Terme de régularisation L1 sur les poids
+    'classifier__reg_lambda':        uniform(0, 5)        # Terme de régularisation L2 sur les poids
 }
 
 
@@ -800,14 +801,14 @@ param_lgb = {
 # Le script suivant test plusieurs configurations pour traquer la meilleure performance possible.
 
 param_lgb_2 = {
-    'classifier__n_estimators': randint(260, 280),  # Nombre d'arbres à construire
-    'classifier__max_depth': [8],  # Profondeur maximale de l'arbre
-    'classifier__learning_rate': uniform(0.03, 0.06),  # Taux d'apprentissage
-    'classifier__subsample': uniform(0.48, 0.52),  # Sous-échantillonnage des observations lors de la construction de chaque arbre
-    'classifier__colsample_bytree': uniform(0.56, 0.59),  # Sous-échantillonnage des colonnes lors de la construction de chaque arbre
-    'classifier__min_child_samples': randint(9, 11),  # Nombre minimal d'échantillons requis pour chaque feuille
-    'classifier__reg_alpha': uniform(1, 1.5),  # Terme de régularisation L1 sur les poids
-    'classifier__reg_lambda': uniform(2.55, 2.65)  # Terme de régularisation L2 sur les poids
+    'classifier__n_estimators':      randint(260, 280),    # Nombre d'arbres à construire
+    'classifier__max_depth':         [8],                  # Profondeur maximale de l'arbre
+    'classifier__learning_rate':     uniform(0.03, 0.06),  # Taux d'apprentissage
+    'classifier__subsample':         uniform(0.48, 0.52),  # Sous-échantillonnage des observations lors de la construction de chaque arbre
+    'classifier__colsample_bytree':  uniform(0.56, 0.59),  # Sous-échantillonnage des colonnes lors de la construction de chaque arbre
+    'classifier__min_child_samples': randint(9, 11),       # Nombre minimal d'échantillons requis pour chaque feuille
+    'classifier__reg_alpha':         uniform(1, 1.5),      # Terme de régularisation L1 sur les poids
+    'classifier__reg_lambda':        uniform(2.55, 2.65)   # Terme de régularisation L2 sur les poids
 }
 
 exp_name = 'random_cv_lgb'
@@ -1011,6 +1012,23 @@ Evaluate_Threshold(y_valid_hat=y_test_full_unseen_hat, y_valid=y_full_unseen, y_
                    experience_name="Evaluation test 75% data", phase_name='evaluation test full')
 
 
+# courbe roc
+# Calculer la courbe ROC et l'AUC (Area Under Curve)
+fpr, tpr, thresholds = roc_curve(y_full_unseen, y_test_full_unseen_hat[:,1])
+roc_auc = auc(fpr, tpr)
+
+# Tracer la courbe ROC
+plt.figure()
+plt.plot(fpr, tpr, color='darkorange', lw=2, label='ROC curve (area = %0.2f)' % roc_auc)
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic')
+plt.legend(loc="lower right")
+plt.show()
+
 
 # analyse de la feature importance du meilleur modèle_________________________________
 def Predict_Class(id_customer, y_hat, threshold = 0.411):
@@ -1089,6 +1107,18 @@ def PlotLocal_Importance(instance_ind):
 print(y_test.iloc[4])
 PlotLocal_Importance(4)
 
+# waterfall
+from shap import Explainer
+
+explainer = Explainer(best_lgb_11_05_2)
+sv = explainer(X_test)
+
+shap.plots.waterfall(sv[4], max_display=5)
+shap.force_plot(
+    sv[4], shap_values[4, :], X_test.iloc[4, :], matplotlib=True, show=True
+)
+
+   
 # decision_plot entre sex et score ext 2
 shap.dependence_plot("application_CODE_GENDER_M_sum", shap_values_test, X_test,interaction_index="EXT_SOURCE_2_y")
 

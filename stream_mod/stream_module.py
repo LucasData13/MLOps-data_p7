@@ -7,6 +7,7 @@ Created on Fri May 17 11:04:40 2024
 
 import plotly.graph_objects as go
 import pandas as pd
+import os
 
 class PlotScore:
         
@@ -47,18 +48,60 @@ class PlotScore:
 
 class DataClients:
     
-    def LoadData():
-        path_data = 'https://raw.githubusercontent.com/LucasData13/projet7/main/tests/api_data.csv'
-        #path_data = "C:\\Users\\Utilisateur\\formation_datascientist\\projet_7_implementez_un_modèle_de_scoring\\scripts\\tests\\"
-        api_data = pd.read_csv(path_data) # + 'api_data.csv'
+    def LoadSHAPvalues(local=False):
+        web_data = 'https://raw.githubusercontent.com/LucasData13/projet7/main/stream_mod/global_shap.csv'
+        
+        path_data = web_data
+        if local == True: path_data = open('stream_mod/global_shap.csv', 'rb')
+        shap_data = pd.read_csv(path_data, encoding="ISO-8859-1") 
+        
+        return shap_data
+    
+    def ChangeDir():
+        os.chdir('C:/Users/Utilisateur/formation_datascientist/projet_7_implementez_un_modèle_de_scoring/scripts')
+    
+    def LoadData(local=False):
+        web_data = 'https://raw.githubusercontent.com/LucasData13/projet7/main/tests/api_data.csv'
+        
+        path_data = web_data
+        if local == True: path_data = open('tests/api_data.csv', 'rb')
+        api_data = pd.read_csv(path_data)
         
         X = api_data.drop(['SK_ID_CURR', 'TARGET', 'Unnamed: 0'], axis=1)
         X_id = api_data['SK_ID_CURR']
-        '''
-        # Convertir les colonnes booléennes en entiers
-        for col in X.columns:
-            X[col] = X[col].astype(float)
-        '''
+
         X = X.fillna(0.0)
         
         return X, X_id
+    
+    def LoadData2(local=False):
+        web_data = 'https://raw.githubusercontent.com/LucasData13/projet7/main/tests/api_data.csv'
+        
+        path_data = web_data
+        if local == True: path_data = open('tests/api_data.csv', 'rb')
+        api_data = pd.read_csv(path_data)
+        
+        X = api_data.drop(['TARGET', 'Unnamed: 0'], axis=1)
+        X = X.fillna(0.0)
+        
+        return X
+
+    def LoadApplicationData(local=False):
+        web_data = 'https://raw.githubusercontent.com/LucasData13/projet7/main/tests/application_train.csv'
+        
+        path_data = web_data
+        if local == True: path_data = open('tests/application_train.csv', 'rb')
+        application_train = pd.read_csv(path_data) 
+        
+        return application_train
+    
+    def LoadDescriptionData(local=False):
+        web_data = 'https://raw.githubusercontent.com/LucasData13/projet7/main/tests/HomeCredit_columns_description.csv'
+        
+        path_data = web_data
+        if local == True: path_data = open('tests/HomeCredit_columns_description.csv', 'rb')
+        desc_data = pd.read_csv(path_data, encoding="ISO-8859-1") 
+        
+        return desc_data
+    
+   
